@@ -300,6 +300,15 @@ async function uploadLargeLocalFile(bucketId, file, publicKey) {
 		} catch (ex) {
 			if (ex.response && ex.response.data && ex.response.data.code && ['bad_auth_token', 'expired_auth_token', 'service_unavailable'].includes(ex.response.data.code)) {
 				// Get a new upload URL
+
+				if (process.stdout.isTTY) {
+					let pct = Math.round((bytesUploaded / file.stat.size) * 100);
+					process.stdout.clearLine(0);
+					process.stdout.write(`\rUploading large file ${file.fileName}... reauth `);
+				} else {
+					console.log(`Uploading large file ${file.fileName}... reauth `);
+				}
+
 				pendingChunk = data;
 				response = await b2.getUploadPartUrl({fileId});
 				if (!response.data || !response.data.uploadUrl || !response.data.authorizationToken) {
