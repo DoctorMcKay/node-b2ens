@@ -201,7 +201,7 @@ async function uploadLocalFile(bucketId, file, publicKey, why) {
 		process.stdout.clearLine(0);
 		process.stdout.write("\r");
 	}
-	process.stdout.write(`Uploading ${why} ${file.fileName}... ${eol}`);
+	process.stdout.write(`Uploading ${why} file ${file.fileName}... ${eol}`);
 
 	try {
 		let uploadUrl = await getUploadUrl(bucketId);
