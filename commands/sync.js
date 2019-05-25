@@ -51,7 +51,10 @@ let b2 = new B2({
 	"applicationKey": syncfile.applicationKey || syncfile.appKey
 });
 
-main().then(() => console.log('Done')).catch(err => console.error(err));
+let startTime = Date.now();
+main().then(() => {
+	console.log(`Done in ${Date.now() - startTime} milliseconds`);
+}).catch(err => console.error(err));
 
 async function main() {
 	let publicKey;
