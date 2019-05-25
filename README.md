@@ -15,6 +15,12 @@ The application compares the local directory and the remote bucket, and for each
 - If the file exists remotely but not locally, hides it on B2
 - If the file exists both locally and remotely but the modification times are different, uploads the local copy and overwrites the remote copy
 	- **Note:** It will still upload the local copy even if the remote modification time is newer!
+	
+Local files will **never** be modified. This tool is intended to allow you to backup a local directory to Backblaze B2,
+not to use B2 as a sort of Dropbox.
+
+B2ENS assumes it has exclusive control over the bucket you configure it to use. If you upload files without using B2ENS,
+they will be hidden (deleted) the next time B2ENS runs. 
 
 # Usage
 
