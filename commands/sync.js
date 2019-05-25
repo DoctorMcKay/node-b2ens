@@ -5,6 +5,7 @@ const FS = require('fs');
 const Encryption = require('../components/encryption.js');
 
 const LAST_MODIFIED_KEY = 'src_last_modified_millis';
+const MAX_CONCURRENT_UPLOADS = 5; // used only for large files at the moment
 
 let g_UploadUrl;
 
@@ -130,7 +131,8 @@ async function main() {
 		}
 	}
 
-	await cancelUnfinishedLargeFiles();
+	// not yet implemented in backblaze-b2
+	//await cancelUnfinishedLargeFiles();
 }
 
 async function listBucketFiles(bucketId, prefix) {
@@ -265,69 +267,83 @@ async function uploadLargeLocalFile(bucketId, file, publicKey) {
 	}
 
 	let fileId = response.data.fileId;
-	response = await b2.getUploadPartUrl({fileId});
-	if (!response.data || !response.data.uploadUrl || !response.data.authorizationToken) {
-		console.error(`Did not get upload URL for uploading large file ${file.fileName}`);
-		process.exit(5);
-	}
 
-	let uploadUrl = response.data.uploadUrl;
-	let uploadAuthToken = response.data.authorizationToken;
 	let partHashes = [];
 	let bytesUploaded = 0; // this won't be exact because we're counting encrypted bytes, but it's close enough
 
 	let ended = false;
-	let pendingChunk = null;
 	encrypt.on('end', () => ended = true);
-	while (!ended) {
-		if (process.stdout.isTTY) {
-			let pct = Math.round((bytesUploaded / file.stat.size) * 100);
-			process.stdout.clearLine(0);
-			process.stdout.write(`\rUploading large file ${file.fileName}... ${pct}% `);
-		}
 
-		let data = pendingChunk || await getNextChunk();
-		let hash = sha1(data);
+	// Spin up some "threads" (promises) to handle uploading
+	let uploadThreads = [];
+	for (let i = 0; i < MAX_CONCURRENT_UPLOADS; i++) {
+		uploadThreads.push(new Promise(async (resolve) => {
+			let uploadUrl, uploadAuthToken, data;
 
-		try {
-			response = await b2.uploadPart({
-				partNumber: partHashes.length + 1,
-				uploadUrl,
-				uploadAuthToken,
-				data,
-				hash
-			});
-		} catch (ex) {
-			if (ex.response && ex.response.data && ex.response.data.code && ['bad_auth_token', 'expired_auth_token', 'service_unavailable'].includes(ex.response.data.code)) {
-				// Get a new upload URL
+			while ((data = await getNextChunk()) !== null) {
+				let chunkId = partHashes.length;
+				let hash = sha1(data);
+				partHashes.push(hash);
 
+				let attempts = 0;
+				let err = null;
+				do {
+					if (!uploadUrl) {
+						let response = await b2.getUploadPartUrl({fileId});
+						if (!response.data || !response.data.uploadUrl || !response.data.authorizationToken) {
+							console.error(`Did not get upload URL for uploading large file ${file.fileName}`);
+							process.exit(5);
+						}
+
+						uploadUrl = response.data.uploadUrl;
+						uploadAuthToken = response.data.authorizationToken;
+					}
+
+					try {
+						await b2.uploadPart({
+							partNumber: chunkId + 1,
+							uploadUrl,
+							uploadAuthToken,
+							data,
+							hash
+						});
+
+						// part upload succeeded
+						bytesUploaded += data.length;
+						break;
+					} catch (ex) {
+						if (
+							ex.response &&
+							ex.response.data &&
+							ex.response.data.code &&
+							['bad_auth_token', 'expired_auth_token', 'service_unavailable'].includes(ex.response.data.code)
+						) {
+							// we'll get a new upload url and try again
+							uploadUrl = null;
+						} else {
+							err = ex;
+						}
+					}
+				} while (++attempts <= 5);
+
+				if (err) {
+					throw err;
+				}
+
+				// Chunk upload succeeded
 				if (process.stdout.isTTY) {
-					let pct = Math.round((bytesUploaded / file.stat.size) * 100);
+					let pct = Math.floor((bytesUploaded / file.stat.size) * 100);
 					process.stdout.clearLine(0);
-					process.stdout.write(`\rUploading large file ${file.fileName}... reauth `);
-				} else {
-					console.log(`Uploading large file ${file.fileName}... reauth `);
+					process.stdout.write(`\rUploading large file ${file.fileName}... ${pct}% `);
 				}
+			} // get next chunk
 
-				pendingChunk = data;
-				response = await b2.getUploadPartUrl({fileId});
-				if (!response.data || !response.data.uploadUrl || !response.data.authorizationToken) {
-					console.error(`\nDid not get new upload URL for uploading large file ${file.fileName}`);
-					process.exit(5);
-				}
-
-				uploadUrl = response.data.uploadUrl;
-				uploadAuthToken = response.data.authorizationToken;
-				continue;
-			} else {
-				throw ex;
-			}
-		}
-
-		pendingChunk = null;
-		partHashes.push(hash);
-		bytesUploaded += data.length;
+			// No more data; we're done
+			resolve();
+		}));
 	}
+
+	await Promise.all(uploadThreads);
 
 	if (process.stdout.isTTY) {
 		process.stdout.clearLine(0);
@@ -348,6 +364,10 @@ async function uploadLargeLocalFile(bucketId, file, publicKey) {
 	console.log(`Uploading large file ${file.fileName}... complete`);
 
 	async function getNextChunk() {
+		if (ended) {
+			return null;
+		}
+
 		let chunk = encrypt.read(chunkSize);
 		if (chunk !== null) {
 			return chunk;
