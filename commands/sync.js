@@ -214,7 +214,7 @@ async function uploadLocalFile(bucketId, file, publicKey) {
 			}
 		});
 
-		console.log(`complete (file ID ${response.data.fileId})`);
+		console.log(`complete`);
 
 		return response.data;
 	} catch (ex) {
