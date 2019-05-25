@@ -300,6 +300,11 @@ async function uploadLargeLocalFile(bucketId, file, publicKey) {
 		partSha1Array: partHashes
 	});
 
+	if (process.stdout.isTTY) {
+		process.stdout.clearLine(0);
+		process.stdout.write("\r");
+	}
+
 	console.log(`Uploading large file ${file.fileName}... complete`);
 
 	async function getNextChunk() {
