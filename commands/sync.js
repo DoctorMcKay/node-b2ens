@@ -109,9 +109,13 @@ async function main() {
 	for (let i in localFiles) {
 		if (!bucketFiles[i]) {
 			// Missing in remote
-			await uploadLocalFile(bucket.bucketId, localFiles[i], publicKey);
+			await uploadLocalFile(bucket.bucketId, localFiles[i], publicKey, 'new');
 		} else {
-			// TODO compare timestamps
+			if (!bucketFiles[i].fileInfo || !bucketFiles[i].fileInfo[LAST_MODIFIED_KEY]) {
+				console.log(`Warning: File ${i} is missing a modification time`);
+			} else if (bucketFiles[i].fileInfo[LAST_MODIFIED_KEY] != localFiles[i].stat.mtimeMs) {
+				await uploadLocalFile(bucket.bucketId, localFiles[i], publicKey, 'modified');
+			}
 		}
 	}
 
@@ -174,7 +178,7 @@ function listLocalFiles(directory, prefix, files) {
 	return files;
 }
 
-async function uploadLocalFile(bucketId, file, publicKey) {
+async function uploadLocalFile(bucketId, file, publicKey, why) {
 	if (file.stat.size > 10000000) {
 		// More than 10 MB
 		return uploadLargeLocalFile(bucketId, file, publicKey);
@@ -197,7 +201,7 @@ async function uploadLocalFile(bucketId, file, publicKey) {
 		process.stdout.clearLine(0);
 		process.stdout.write("\r");
 	}
-	process.stdout.write(`Uploading ${file.fileName}... ${eol}`);
+	process.stdout.write(`Uploading ${why} ${file.fileName}... ${eol}`);
 
 	try {
 		let uploadUrl = await getUploadUrl(bucketId);
