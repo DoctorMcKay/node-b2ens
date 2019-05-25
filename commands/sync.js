@@ -234,7 +234,7 @@ async function uploadLocalFile(bucketId, file, publicKey, why) {
 
 async function uploadLargeLocalFile(bucketId, file, publicKey) {
 	let eol = process.stdout.isTTY ? '' : '\n';
-	process.stdout.write(`Preparing large file ${file.fileName}... ${eol}`);
+	process.stdout.write(`Uploading large file ${file.fileName}... preparing ${eol}`);
 
 	let chunkSize = Math.max(5000000, Math.ceil(file.stat.size / 10000)); // minimum 5 MB for each chunk
 	let readStream = FS.createReadStream(file.fullPath);
@@ -244,8 +244,13 @@ async function uploadLargeLocalFile(bucketId, file, publicKey) {
 	let response = await b2.startLargeFile({
 		bucketId,
 		"fileName": file.fileName,
-		"fileInfo": {
-			[LAST_MODIFIED_KEY]: file.stat.mtimeMs
+		// backblaze-b2 doesn't support fileInfo in this method
+		"axios": {
+			"data": {
+				"fileInfo": {
+					[LAST_MODIFIED_KEY]: file.stat.mtimeMs
+				}
+			}
 		}
 	});
 
