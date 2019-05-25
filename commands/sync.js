@@ -248,7 +248,7 @@ async function uploadLargeLocalFile(bucketId, file, publicKey) {
 		"axios": {
 			"data": {
 				"fileInfo": {
-					[LAST_MODIFIED_KEY]: file.stat.mtimeMs
+					[LAST_MODIFIED_KEY]: file.stat.mtimeMs.toString()
 				}
 			}
 		}
