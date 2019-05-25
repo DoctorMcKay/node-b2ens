@@ -1,11 +1,11 @@
 {
-	"name": "b2cns",
+	"name": "b2ens",
 	"version": "1.0.0",
 	"private": true,
-	"description": "Backblaze B2 Crypt-n-Sync: a command-line application to synchronize a local directory to a B2 bucket",
+	"description": "Backblaze B2 Encrypt-n-Sync: a command-line application to synchronize a local directory to a B2 bucket",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/DoctorMcKay/node-b2cns.git"
+		"url": "https://github.com/DoctorMcKay/node-b2ens.git"
 	},
 	"license": "GPL-3.0-or-later",
 	"dependencies": {
