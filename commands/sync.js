@@ -262,7 +262,7 @@ async function uploadLargeLocalFile(bucketId, file, publicKey) {
 
 	let uploadUrl = response.data.uploadUrl;
 	let uploadAuthToken = response.data.authorizationToken;
-	let partNumber = 1;
+	let partHashes = [];
 	let bytesUploaded = 0; // this won't be exact because we're counting encrypted bytes, but it's close enough
 
 	let ended = false;
@@ -275,21 +275,29 @@ async function uploadLargeLocalFile(bucketId, file, publicKey) {
 		}
 
 		let data = await getNextChunk();
+		let hash = sha1(data);
 		response = await b2.uploadPart({
-			partNumber,
+			partNumber: partHashes.length + 1,
 			uploadUrl,
 			uploadAuthToken,
-			data
+			data,
+			hash
 		});
 
-		partNumber++;
+		partHashes.push(hash);
 		bytesUploaded += data.length;
 	}
 
 	if (process.stdout.isTTY) {
 		process.stdout.clearLine(0);
 		process.stdout.write("\r");
+		process.stdout.write(`Uploading large file ${file.fileName}... finalizing `);
 	}
+
+	await b2.finishLargeFile({
+		fileId,
+		partSha1Array: partHashes
+	});
 
 	console.log(`Uploading large file ${file.fileName}... complete`);
 
@@ -324,4 +332,10 @@ async function getUploadUrl(bucketId) {
 
 	g_UploadUrl = {"uploadUrl": response.data.uploadUrl, "uploadAuthToken": response.data.authorizationToken};
 	return g_UploadUrl;
+}
+
+function sha1(data) {
+	let hash = Crypto.createHash('sha1');
+	hash.update(data);
+	return hash.digest('hex');
 }
