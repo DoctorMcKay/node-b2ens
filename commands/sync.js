@@ -1,4 +1,5 @@
 const B2 = require('backblaze-b2');
+const Crypto = require('crypto');
 const FS = require('fs');
 
 const Encryption = require('../components/encryption.js');
