@@ -129,6 +129,8 @@ async function main() {
 			await hideRemoteFile(bucketFiles[i]);
 		}
 	}
+
+	await cancelUnfinishedLargeFiles();
 }
 
 async function listBucketFiles(bucketId, prefix) {
@@ -373,4 +375,17 @@ function sha1(data) {
 	let hash = Crypto.createHash('sha1');
 	hash.update(data);
 	return hash.digest('hex');
+}
+
+async function cancelUnfinishedLargeFiles(bucketId) {
+	let response = await b2.listUnfinishedLargeFiles({bucketId});
+	if (response.data || !response.data.files) {
+		return;
+	}
+
+	console.log(`Found ${response.data.files.length} unfinished large files to cancel`);
+	for (let i = 0; i < response.data.files.length; i++) {
+		await b2.cancelLargeFile({"fileId": response.data.files[i].fileId});
+		console.log(`Canceled large file ${response.data.files[i].fileId}`);
+	}
 }
