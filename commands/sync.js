@@ -302,7 +302,7 @@ async function uploadLargeLocalFile(bucketId, file, publicKey) {
 				// Get a new upload URL
 				pendingChunk = data;
 				response = await b2.getUploadPartUrl({fileId});
-				if (response.data || !response.data.uploadUrl || !response.data.authorizationToken) {
+				if (!response.data || !response.data.uploadUrl || !response.data.authorizationToken) {
 					console.error(`\nDid not get new upload URL for uploading large file ${file.fileName}`);
 					process.exit(5);
 				}
