@@ -189,7 +189,7 @@ async function uploadLocalFile(bucketId, file, publicKey, why) {
 	}
 
 	let eol = process.stdout.isTTY ? '' : '\n';
-	process.stdout.write(`Encrypting ${file.fileName}... ${eol}`);
+	process.stdout.write(`Uploading ${why} file ${file.fileName}... encrypting ${eol}`);
 
 	let data = await new Promise((resolve) => {
 		let encrypt = Encryption.createEncryptStream(publicKey);
