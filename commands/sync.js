@@ -185,7 +185,7 @@ function listLocalFiles(directory, prefix, files) {
 async function uploadLocalFile(bucketId, file, publicKey, why) {
 	if (file.stat.size > 10000000) {
 		// More than 10 MB
-		return uploadLargeLocalFile(bucketId, file, publicKey);
+		return await uploadLargeLocalFile(bucketId, file, publicKey);
 	}
 
 	let eol = process.stdout.isTTY ? '' : '\n';
