@@ -276,7 +276,7 @@ async function uploadLargeLocalFile(bucketId, file, publicKey) {
 
 	// Spin up some "threads" (promises) to handle uploading
 	let uploadThreads = [];
-	for (let i = 0; i < MAX_CONCURRENT_UPLOADS; i++) {
+	for (let i = 0; i < (syncfile.uploadThreads || MAX_CONCURRENT_UPLOADS); i++) {
 		uploadThreads.push(new Promise(async (resolve) => {
 			let uploadUrl, uploadAuthToken, data;
 

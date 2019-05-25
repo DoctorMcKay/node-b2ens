@@ -57,6 +57,7 @@ A *syncfile* is a JSON file containing the configuration for a sync. It should l
 	- `prefix` - **DO NOT USE.** Untested and probably doesn't work.
 - `keyId` - The key ID you want to use to authenticate with Backblaze. For security reasons, this should be an application key that can only access your one bucket.
 - `applicationKey` - The Backblaze application key
+- `uploadThreads` - The number of threads to use when uploading large files (default 5). Lower this if you're having network issues.
 - `encryptionKey` - You only need to specify **one** of the following
 	- `publicKeyPath` - The path to a PEM-encoded file contaning an RSA public key
 	- `publicKey` - A PEM-encoded RSA public key
