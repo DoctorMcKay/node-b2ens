@@ -24,6 +24,21 @@ they will be hidden (deleted) the next time B2ENS runs.
 
 # Usage
 
+Install it from npm by running `npm install -g b2ens` in an administrator command prompt (on Windows) or as root (on Linux).
+
+Use it by running `b2ens <command>` on the command line. Available commands:
+
+```
+$ b2ens sync <path to syncfile>
+    See "Syncfiles" section below
+
+$ b2ens generate-keypair <public key output file path> <private key output file path>
+
+$ b2ens encrypt-file <path to public or private key> <input file path> [output file path]
+
+$ b2ens decrypt-file <path to private key> <input file path> [output file path] 
+```
+
 Eventually this will be published on npm so you can use `npm install -g b2ens` and then use it as `b2ens <command>`.
 For now, clone or download the repository, and use `node index.js <command>`. Right now the only supported command is
 `sync`, and you should use it like this: `node index.js sync <path to syncfile>`.

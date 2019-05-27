@@ -26,6 +26,13 @@ module.exports = function(mode) {
 	console.log(`${titleMode}ing to output file ${outputFilePath}`);
 	readStream.pipe(cryptoStream).pipe(outStream);
 
+	cryptoStream.on('error', (err) => {
+		outStream.end();
+		FS.unlinkSync(outputFilePath);
+		process.stderr.write(`\n${titleMode}ion error: ${err.message}\n`);
+		process.exit(3);
+	});
+
 	let interval = null;
 	if (process.stdout.isTTY) {
 		interval = setInterval(() => {
