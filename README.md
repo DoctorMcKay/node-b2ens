@@ -39,10 +39,6 @@ $ b2ens encrypt-file <path to public or private key> <input file path> [output f
 $ b2ens decrypt-file <path to private key> <input file path> [output file path] 
 ```
 
-Eventually this will be published on npm so you can use `npm install -g b2ens` and then use it as `b2ens <command>`.
-For now, clone or download the repository, and use `node index.js <command>`. Right now the only supported command is
-`sync`, and you should use it like this: `node index.js sync <path to syncfile>`.
-
 # Syncfiles
 
 A *syncfile* is a JSON file containing the configuration for a sync. It should look like this:

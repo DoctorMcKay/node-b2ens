@@ -1,19 +1,21 @@
+#!/usr/bin/env node
+
 let command = process.argv[2];
 switch (command) {
 	case 'sync':
-		require('./commands/sync.js');
+		require('../commands/sync.js');
 		break;
 
 	case 'decrypt-file':
-		require('./commands/decrypt-file.js');
+		require('../commands/decrypt-file.js');
 		break;
 
 	case 'encrypt-file':
-		require('./commands/encrypt-file.js');
+		require('../commands/encrypt-file.js');
 		break;
 
 	case 'generate-keypair':
-		require('./commands/generate-keypair.js');
+		require('../commands/generate-keypair.js');
 		break;
 
 	default:
