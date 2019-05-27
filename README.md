@@ -39,7 +39,7 @@ A *syncfile* is a JSON file containing the configuration for a sync. It should l
 	},
 	"remote": {
 		"bucket": "name-of-bucket",
-		"prefix": ""
+		"prefix": "somefolder/"
 	},
 	"keyId": "backblaze key id",
 	"applicationKey": "backblaze application key",
@@ -54,7 +54,7 @@ A *syncfile* is a JSON file containing the configuration for a sync. It should l
 	- `directory` - The local directory to be backed up to Backblaze
 - `remote`
 	- `bucket` - The name of the bucket (not the bucket ID) you want to back up to
-	- `prefix` - **DO NOT USE.** Untested and probably doesn't work.
+	- `prefix` - If you want your backup root in the remote bucket to be in a folder, put the full path to the folder relative to the bucket root here. No leading slash, trailing slash required. Example: "somefolder/" or "some/folder/". If you omit the trailing slash, then all files will be uploaded to the bucket root, but with this value prefixed to their filenames. For example, a prefix of "foo" will cause a file named "test.txt" to be uploaded as "footest.txt".
 - `keyId` - The key ID you want to use to authenticate with Backblaze. For security reasons, this should be an application key that can only access your one bucket.
 - `applicationKey` - The Backblaze application key
 - `uploadThreads` - The number of threads to use when uploading large files (default 5). Lower this if you're having network issues.
