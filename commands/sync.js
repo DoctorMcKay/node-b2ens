@@ -11,7 +11,7 @@ let g_UploadUrl;
 
 let syncfile = process.argv[3];
 if (!syncfile) {
-	console.error('Usage: b2cns sync <syncfile>');
+	console.error('Usage: b2ens sync <syncfile>');
 	process.exit(2);
 }
 

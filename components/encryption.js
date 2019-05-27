@@ -30,6 +30,8 @@ class EncryptStream extends Stream.Transform {
 	constructor(publicKey, options) {
 		super(options);
 
+		this.processedBytes = 0;
+
 		let header = Buffer.alloc(3);
 		let keyAndIv = Crypto.randomBytes(32 + 16);
 		let encryptedKey = Crypto.publicEncrypt(publicKey, keyAndIv);
@@ -49,6 +51,7 @@ class EncryptStream extends Stream.Transform {
 	}
 
 	_transform(chunk, encoding, callback) {
+		this.processedBytes += chunk.length;
 		let encoded = this._cipher.update(chunk, encoding);
 		if (encoded && encoded.length > 0) {
 			this._hmac.update(encoded);
@@ -73,6 +76,8 @@ class EncryptStream extends Stream.Transform {
 class DecryptStream extends Stream.Transform {
 	constructor(privateKey, options) {
 		super(options);
+
+		this.processedBytes = 0;
 
 		this._privateKey = privateKey;
 		this._headerBuffer = Buffer.alloc(0);
@@ -169,6 +174,7 @@ class DecryptStream extends Stream.Transform {
 	}
 
 	_processBuffer(buf) {
+		this.processedBytes += buf.length;
 		let decoded = this._decipher.update(buf);
 		if (decoded && decoded.length > 0) {
 			this.push(decoded);
