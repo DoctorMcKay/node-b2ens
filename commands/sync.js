@@ -58,7 +58,7 @@ main().then(() => {
 }).catch(err => console.error(err));
 
 async function main() {
-	let publicKey;
+	let publicKey = null;
 	await new Promise((resolve) => {
 		if (syncfile.encryptionKey.publicKey) {
 			publicKey = syncfile.encryptionKey.publicKey;
@@ -114,12 +114,12 @@ async function main() {
 	for (let i in localFiles) {
 		if (!bucketFiles[i]) {
 			// Missing in remote
-			await uploadLocalFile(bucket.bucketId, localFiles[i], publicKey, 'new');
+			await uploadLocalFile(bucket.bucketId, localFiles[i], publicKey, 'new', syncfile.remote.prefix || '');
 		} else {
 			if (!bucketFiles[i].fileInfo || !bucketFiles[i].fileInfo[LAST_MODIFIED_KEY]) {
 				console.log(`Warning: File ${i} is missing a modification time`);
 			} else if (bucketFiles[i].fileInfo[LAST_MODIFIED_KEY] != localFiles[i].stat.mtimeMs) {
-				await uploadLocalFile(bucket.bucketId, localFiles[i], publicKey, 'modified');
+				await uploadLocalFile(bucket.bucketId, localFiles[i], publicKey, 'modified', syncfile.remote.prefix || '');
 			}
 		}
 	}
@@ -127,7 +127,7 @@ async function main() {
 	for (let i in bucketFiles) {
 		if (!localFiles[i]) {
 			// Missing locally
-			await hideRemoteFile(bucketFiles[i]);
+			await hideRemoteFile(bucketFiles[i], syncfile.remote.prefix || '');
 		}
 	}
 
@@ -153,6 +153,10 @@ async function listBucketFiles(bucketId, prefix) {
 		}
 
 		response.data.files.forEach((file) => {
+			if (prefix) {
+				file.fileName = file.fileName.replace(prefix, ''); // replaces only the first occurrence
+			}
+
 			files[file.fileName] = file;
 		});
 
@@ -186,10 +190,10 @@ function listLocalFiles(directory, prefix, files) {
 	return files;
 }
 
-async function uploadLocalFile(bucketId, file, publicKey, why) {
+async function uploadLocalFile(bucketId, file, publicKey, why, prefix) {
 	if (file.stat.size > 10000000) {
 		// More than 10 MB
-		return await uploadLargeLocalFile(bucketId, file, publicKey);
+		return await uploadLargeLocalFile(bucketId, file, publicKey, prefix);
 	}
 
 	let eol = process.stdout.isTTY ? '' : '\n';
@@ -216,7 +220,7 @@ async function uploadLocalFile(bucketId, file, publicKey, why) {
 		let response = await b2.uploadFile({
 			uploadUrl: uploadUrl.uploadUrl,
 			uploadAuthToken: uploadUrl.uploadAuthToken,
-			fileName: file.fileName,
+			fileName: prefix + file.fileName,
 			data,
 			// Workaround for backblaze-b2 bug #68 - https://github.com/yakovkhalinsky/backblaze-b2/issues/68
 			axios: {
@@ -239,7 +243,7 @@ async function uploadLocalFile(bucketId, file, publicKey, why) {
 	}
 }
 
-async function uploadLargeLocalFile(bucketId, file, publicKey) {
+async function uploadLargeLocalFile(bucketId, file, publicKey, prefix) {
 	let eol = process.stdout.isTTY ? '' : '\n';
 	process.stdout.write(`Uploading large file ${file.fileName}... preparing ${eol}`);
 
@@ -250,7 +254,7 @@ async function uploadLargeLocalFile(bucketId, file, publicKey) {
 
 	let response = await b2.startLargeFile({
 		bucketId,
-		"fileName": file.fileName,
+		"fileName": prefix + file.fileName,
 		// backblaze-b2 doesn't support fileInfo in this method
 		"axios": {
 			"data": {
@@ -378,11 +382,11 @@ async function uploadLargeLocalFile(bucketId, file, publicKey) {
 	}
 }
 
-async function hideRemoteFile(file) {
+async function hideRemoteFile(file, prefix) {
 	console.log(`Hiding missing remote file ${file.fileName}`);
 	await b2.hideFile({
 		"bucketId": file.bucketId,
-		"fileName": file.fileName
+		"fileName": prefix + file.fileName
 	});
 }
 
