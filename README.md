@@ -5,8 +5,6 @@
 This is a utility that is designed to back up (synchronize) a local directory to a [Backblaze B2](https://www.backblaze.com)
 bucket, encrypting the files along the way.
 
-**This is a work-in-progress.**
-
 # Sync Rules
 
 The application compares the local directory and the remote bucket, and for each file:
