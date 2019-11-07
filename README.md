@@ -79,5 +79,5 @@ uploaded file alongside the encrypted data. The final 20 bytes of each uploaded 
 Files under 10 MB in size are encrypted in memory and then uploaded whole. Files larger than 10 MB are encrypted as a
 stream and uploaded in chunks at least 5 MB in size.
 
-Currently it is not possible to decrypt files. That's expected to be added in a future release. The code is already
-written, there just isn't a way to invoke it yet.
+Currently it is possible to decrypt files, but only individually. Eventually there will be a command to download and
+decrypt the entire bucket.
