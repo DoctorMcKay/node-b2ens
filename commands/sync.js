@@ -1,6 +1,7 @@
 const B2 = require('backblaze-b2');
 const Crypto = require('crypto');
 const FS = require('fs');
+const StdLib = require('@doctormckay/stdlib');
 
 const Encryption = require('../components/encryption.js');
 
@@ -243,7 +244,7 @@ async function uploadLocalFile(bucketId, file, publicKey, why, prefix) {
 	}
 }
 
-async function uploadLargeLocalFile(bucketId, file, publicKey, prefix) {
+async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries = 0) {
 	let eol = process.stdout.isTTY ? '' : '\n';
 	process.stdout.write(`Uploading large file ${file.fileName}... preparing ${eol}`);
 
@@ -355,10 +356,26 @@ async function uploadLargeLocalFile(bucketId, file, publicKey, prefix) {
 		process.stdout.write(`Uploading large file ${file.fileName}... finalizing `);
 	}
 
-	await b2.finishLargeFile({
-		fileId,
-		partSha1Array: partHashes
-	});
+	try {
+		await b2.finishLargeFile({
+			fileId,
+			partSha1Array: partHashes
+		});
+	} catch (ex) {
+		if (process.stdout.isTTY) {
+			process.stdout.clearLine(0);
+			process.stdout.write("\r");
+		}
+
+		console.log(`Uploading large file ${file.fileName}... ERROR: ${ex.message}`);
+
+		if (retries >= 5) {
+			console.log(`Large file ${file.fileName} failed fatally`);
+		} else {
+			await StdLib.Promises.sleepAsync(2000);
+			return await uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries + 1);
+		}
+	}
 
 	if (process.stdout.isTTY) {
 		process.stdout.clearLine(0);
