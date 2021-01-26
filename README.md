@@ -32,6 +32,9 @@ $ b2ens sync <path to syncfile>
 
 $ b2ens generate-keypair <public key output file path> <private key output file path>
 
+$ b2ens generate-syncfile
+    Interactively guides you through creating a syncfile
+
 $ b2ens encrypt-file <path to public or private key> <input file path> [output file path]
 
 $ b2ens decrypt-file <path to private key> <input file path> [output file path] 
