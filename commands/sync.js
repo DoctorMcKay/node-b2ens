@@ -202,11 +202,22 @@ async function uploadLocalFile(bucketId, file, publicKey, why, prefix) {
 
 	let data = await new Promise((resolve) => {
 		let encrypt = Encryption.createEncryptStream(publicKey);
-		FS.createReadStream(file.fullPath).pipe(encrypt);
+		let read = FS.createReadStream(file.fullPath);
+		read.pipe(encrypt);
 		let fileChunks = [];
 		encrypt.on('data', chunk => fileChunks.push(chunk));
 		encrypt.on('end', () => {
 			resolve(Buffer.concat(fileChunks));
+		});
+		
+		read.on('error', (err) => {
+			encrypt.destroy();
+			resolve(err);
+		});
+		
+		encrypt.on('error', (err) => {
+			read.destroy();
+			resolve(err);
 		});
 	});
 
@@ -214,6 +225,12 @@ async function uploadLocalFile(bucketId, file, publicKey, why, prefix) {
 		process.stdout.clearLine(0);
 		process.stdout.write("\r");
 	}
+	
+	if (data instanceof Error) {
+		console.log(`Uploading ${why} file ${file.fileName}... ERROR ${data.message}`);
+		return;
+	}
+	
 	process.stdout.write(`Uploading ${why} file ${file.fileName}... ${eol}`);
 
 	try {
@@ -252,6 +269,8 @@ async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries =
 	let readStream = FS.createReadStream(file.fullPath);
 	let encrypt = Encryption.createEncryptStream(publicKey, {"highWaterMark": chunkSize * 2});
 	readStream.pipe(encrypt);
+	
+	// TODO handle stream errors
 
 	let response = await b2.startLargeFile({
 		bucketId,
