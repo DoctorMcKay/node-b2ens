@@ -44,7 +44,8 @@ A *syncfile* is a JSON file containing the configuration for a sync. It should l
 ```json
 {
 	"local": {
-		"directory": "/path/to/directory/to/backup"
+		"directory": "/path/to/directory/to/backup",
+		"exclude": ["/optional/array", "/of/files/or/directories", "/to/exclude"]
 	},
 	"remote": {
 		"bucket": "name-of-bucket",
@@ -61,6 +62,9 @@ A *syncfile* is a JSON file containing the configuration for a sync. It should l
 
 - `local`
 	- `directory` - The local directory to be backed up to Backblaze
+	- `exclude` - An optional array of files and/or directories to exclude
+		- For example, if you are backing up `/var/www/html`, then you would set `local.directory` = `/var/www/html`
+		- If you wanted to exclude `/var/www/html/some-dir` and `/var/www/html/some-file`, then you would set `local.exclude` to `["/var/www/html/some-dir", "/var/www/html/some-file"]`
 - `remote`
 	- `bucket` - The name of the bucket (not the bucket ID) you want to back up to
 	- `prefix` - If you want your backup root in the remote bucket to be in a folder, put the full path to the folder relative to the bucket root here. No leading slash, trailing slash required. Example: "somefolder/" or "some/folder/". If you omit the trailing slash, then all files will be uploaded to the bucket root, but with this value prefixed to their filenames. For example, a prefix of "foo" will cause a file named "test.txt" to be uploaded as "footest.txt".

@@ -110,7 +110,7 @@ async function main() {
 	let bucketFiles = await listBucketFiles(bucket.bucketId, syncfile.remote.prefix || '');
 
 	console.log('Examining local directory...');
-	let localFiles = listLocalFiles(syncfile.local.directory);
+	let localFiles = listLocalFiles(syncfile.local.directory, syncfile.local.exclude || []);
 
 	for (let i in localFiles) {
 		if (!bucketFiles[i]) {
@@ -170,10 +170,11 @@ async function listBucketFiles(bucketId, prefix) {
 /**
  * List and stat the local files on disk.
  * @param {string} directory - The full directory on the local disk
+ * @param {array} exclude
  * @param {string} [prefix] - The prefix we're examining local to the root
  * @param {object} [files]
  */
-function listLocalFiles(directory, prefix, files) {
+function listLocalFiles(directory, exclude, prefix, files) {
 	prefix = prefix || '';
 	files = files || {};
 
@@ -182,13 +183,20 @@ function listLocalFiles(directory, prefix, files) {
 		let relativeFilename = prefix + (prefix ? '/' : '') + file;
 		let stat = FS.statSync(filename);
 		if (stat.isDirectory()) {
-			listLocalFiles(filename, relativeFilename, files);
+			listLocalFiles(filename, exclude, relativeFilename, files);
 		} else {
-			files[relativeFilename] = {"fullPath": filename, "fileName": relativeFilename, stat};
+			// Is this file excluded?
+			if (!exclude.some(exclusion => normalize(filename) == normalize(exclusion) || normalize(filename).startsWith(normalize(exclusion) + '/'))) {
+				files[relativeFilename] = {fullPath: filename, fileName: relativeFilename, stat};
+			}
 		}
 	});
 
 	return files;
+	
+	function normalize(filepath) {
+		return filepath.replace(/\\/g, '/');
+	}
 }
 
 async function uploadLocalFile(bucketId, file, publicKey, why, prefix) {
