@@ -17,8 +17,12 @@ switch (command) {
 	case 'generate-keypair':
 		require('../commands/generate-keypair.js');
 		break;
+		
+	case 'generate-syncfile':
+		require('../commands/generate-syncfile.js');
+		break;
 
 	default:
-		console.error('Usage: b2cns <command>\n  Available commands:\n    - sync\n    - decrypt-file\n    - encrypt-file\n    - generate-keypair');
+		console.error('Usage: b2ens <command>\n  Available commands:\n    - sync\n    - decrypt-file\n    - encrypt-file\n    - generate-keypair\n    - generate-syncfile');
 		process.exit(1);
 }
