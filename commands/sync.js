@@ -320,18 +320,17 @@ async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries =
 				let attempts = 0;
 				let err = null;
 				do {
-					if (!uploadUrl) {
-						let response = await b2.getUploadPartUrl({fileId});
-						if (!response.data || !response.data.uploadUrl || !response.data.authorizationToken) {
-							console.error(`Did not get upload URL for uploading large file ${file.fileName}`);
-							process.exit(5);
-						}
-
-						uploadUrl = response.data.uploadUrl;
-						uploadAuthToken = response.data.authorizationToken;
-					}
-
 					try {
+						if (!uploadUrl) {
+							let response = await b2.getUploadPartUrl({fileId});
+							if (!response.data || !response.data.uploadUrl || !response.data.authorizationToken) {
+								throw new Error(`Did not get upload URL for uploading large file ${file.fileName}`);
+							}
+							
+							uploadUrl = response.data.uploadUrl;
+							uploadAuthToken = response.data.authorizationToken;
+						}
+					
 						await b2.uploadPart({
 							partNumber: chunkId + 1,
 							uploadUrl,
@@ -345,10 +344,12 @@ async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries =
 						break;
 					} catch (ex) {
 						if (
-							ex.response &&
-							ex.response.data &&
-							ex.response.data.code &&
-							['internal_error', 'bad_auth_token', 'expired_auth_token', 'service_unavailable'].includes(ex.response.data.code)
+							ex.message.includes('Did not get upload URL') || (
+								ex.response &&
+								ex.response.data &&
+								ex.response.data.code &&
+								['internal_error', 'bad_auth_token', 'expired_auth_token', 'service_unavailable'].includes(ex.response.data.code)
+							)
 						) {
 							// we'll get a new upload url and try again
 							uploadUrl = null;
