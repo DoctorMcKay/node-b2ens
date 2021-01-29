@@ -348,7 +348,7 @@ async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries =
 							ex.response &&
 							ex.response.data &&
 							ex.response.data.code &&
-							['bad_auth_token', 'expired_auth_token', 'service_unavailable'].includes(ex.response.data.code)
+							['internal_error', 'bad_auth_token', 'expired_auth_token', 'service_unavailable'].includes(ex.response.data.code)
 						) {
 							// we'll get a new upload url and try again
 							uploadUrl = null;
