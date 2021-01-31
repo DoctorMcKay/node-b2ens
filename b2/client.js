@@ -44,6 +44,24 @@ class B2 {
 	}
 	
 	/**
+	 * List all buckets, or get info about a specific bucket.
+	 * @param {{bucketId?: string, bucketName?: string, bucketTypes?: string[]}} [options]
+	 * @returns {Promise<{buckets: [{accountId, bucketId, bucketName, bucketType, bucketInfo, corsRules, lifecycleRules, revision, options}]}>}
+	 */
+	async getBuckets(options) {
+		let res = await this._req({
+			method: 'POST',
+			url: this.authorization.apiUrl + B2_API_PATH + '/b2_list_buckets',
+			body: {
+				accountId: this.authorization.accountId,
+				...(options || {})
+			}
+		});
+		
+		return res.body;
+	}
+	
+	/**
 	 * Get parameters needed to upload a file. These parameters can be reused until an upload fails.
 	 * If an upload fails, you need to get new upload details and try again.
 	 * Each set of upload parameters can only be used by one thread at a time. For concurrent uploads, you
@@ -208,6 +226,44 @@ class B2 {
 			headers,
 			onUploadProgress,
 			body: file
+		});
+		
+		return res.body;
+	}
+	
+	/**
+	 * List files in bucket by name.
+	 * @param {string} bucketId
+	 * @param {{startFileName?: string, maxFileCount?: int, prefix?: string, delimiter?: string}} [options]
+	 * @returns {Promise<{files: array, nextFileName: string|null}>}
+	 */
+	async listFileNames(bucketId, options) {
+		let res = await this._req({
+			method: 'POST',
+			url: this.authorization.apiUrl + B2_API_PATH + '/b2_list_file_names',
+			body: {
+				bucketId,
+				...(options || {})
+			}
+		});
+		
+		return res.body;
+	}
+	
+	/**
+	 * Hide a file.
+	 * @param {string} bucketId
+	 * @param {string} filename
+	 * @returns {Promise<{fileId, partNumber, contentLength, contentSha1, contentMd5?, uploadTimestamp}>}
+	 */
+	async hideFile(bucketId, filename) {
+		let res = await this._req({
+			method: 'POST',
+			url: this.authorization.apiUrl + B2_API_PATH + '/b2_hide_file',
+			body: {
+				bucketId,
+				fileName: filename
+			}
 		});
 		
 		return res.body;
