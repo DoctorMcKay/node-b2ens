@@ -48,6 +48,8 @@ class EncryptStream extends Stream.Transform {
 		this._hmac = Crypto.createHmac(HMAC_ALGO, key.slice(0, 16));
 
 		this._hmac.update(encryptedKey);
+		
+		this.overheadLength = header.length + encryptedKey.length + 20; // hmac is 20 bytes
 	}
 
 	_transform(chunk, encoding, callback) {
