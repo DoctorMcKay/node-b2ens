@@ -16,6 +16,11 @@ class B2 {
 		this.authorization = null;
 	}
 	
+	/**
+	 * Authorize your account with B2. Once authorized, if your auth token expires the client will attempt
+	 * to automatically reauth.
+	 * @returns {Promise}
+	 */
 	async authorize() {
 		let res = await this._req({
 			method: 'POST',
@@ -38,6 +43,14 @@ class B2 {
 		this.authorization.time = Date.now();
 	}
 	
+	/**
+	 * Get parameters needed to upload a file. These parameters can be reused until an upload fails.
+	 * If an upload fails, you need to get new upload details and try again.
+	 * Each set of upload parameters can only be used by one thread at a time. For concurrent uploads, you
+	 * need to retrieve multiple sets of upload details.
+	 * @param {string} bucketId
+	 * @returns {Promise}
+	 */
 	async getUploadDetails(bucketId) {
 		let res = await this._req({
 			method: 'POST',
@@ -51,21 +64,123 @@ class B2 {
 	}
 	
 	/**
-	 *
+	 * Upload a file.
 	 * @param {object} uploadDetails - Should be the full object returned by getUploadDetails
 	 * @param {{filename: string, contentLength: int, contentType?: string, b2Info?: object}} fileDetails
 	 * @param {string|Buffer|Stream.Readable} file
 	 * @param {function} [onUploadProgress]
-	 * @returns {Promise<void>}
+	 * @returns {Promise<{accountId, action, bucketId, contentLength, contentSha1, contentMd5?, contentType, fileId, fileInfo, fileName, uploadTimestamp}>}
 	 */
 	async uploadFile(uploadDetails, fileDetails, file, onUploadProgress) {
-		let sha1 = 'hex_digits_at_end';
+		let headers = {
+			authorization: uploadDetails.authorizationToken,
+			'x-bz-file-name': fileDetails.filename,
+			'content-type': fileDetails.contentType || 'b2/x-auto',
+			'content-length': fileDetails.contentLength
+		};
+		
+		for (let i in (fileDetails.b2Info || {})) {
+			headers['x-bz-info-' + i] = fileDetails.b2Info[i];
+		}
+		
+		return await this._uploadFileOrPart(uploadDetails.uploadUrl, headers, file, onUploadProgress);
+	}
+	
+	/**
+	 *
+	 * @param {string} bucketId
+	 * @param {{filename: string, contentType?: string, b2Info?: object}} fileDetails
+	 * @returns {Promise<{accountId, action, bucketId, contentLength, contentSha1, contentMd5?, contentType, fileId, fileInfo, fileName, uploadTimestamp}>}
+	 */
+	async startLargeFile(bucketId, fileDetails) {
+		let res = await this._req({
+			method: 'POST',
+			url: this.authorization.apiUrl + B2_API_PATH + '/b2_start_large_file',
+			body: {
+				bucketId,
+				fileName: fileDetails.filename,
+				contentType: fileDetails.contentType || 'b2/x-auto',
+				fileInfo: fileDetails.b2Info || {}
+			}
+		});
+		
+		return res.body;
+	}
+	
+	/**
+	 * Finalize a large file for which you have uploaded all parts.
+	 * @param {string} fileId
+	 * @param {string[]} partSha1Array - Array of SHA1 hashes of uploaded parts, in order
+	 * @returns {Promise<{accountId, action, bucketId, contentLength, contentSha1, contentMd5?, contentType, fileId, fileInfo, fileName, uploadTimestamp}>}
+	 */
+	async finishLargeFile(fileId, partSha1Array) {
+		let res = await this._req({
+			method: 'POST',
+			url: this.authorization.apiUrl + B2_API_PATH + '/b2_finish_large_file',
+			body: {
+				fileId,
+				partSha1Array
+			}
+		});
+		
+		return res.body;
+	}
+	
+	/**
+	 * Get parameters needed to upload a large file part. These parameters can be reused until an upload fails.
+	 * If an upload fails, you need to get new upload details and try again.
+	 * Each set of upload parameters can only be used by one thread at a time. For concurrent uploads, you
+	 * need to retrieve multiple sets of upload details.
+	 * @param {string} fileId
+	 * @returns {Promise}
+	 */
+	async getLargeFilePartUploadDetails(fileId) {
+		let res = await this._req({
+			method: 'POST',
+			url: this.authorization.apiUrl + B2_API_PATH + '/b2_get_upload_part_url',
+			body: {
+				fileId
+			}
+		});
+		
+		return res.body;
+	}
+	
+	/**
+	 *
+	 * @param {object} uploadDetails - Should be the full object returned from getPartUploadDetails
+	 * @param {{partNumber: int, contentLength: int}} partDetails
+	 * @param {string|Buffer|Stream.Readable} part
+	 * @param {function} [onUploadProgress]
+	 * @returns {Promise<{fileId, partNumber, contentLength, contentSha1, contentMd5?, uploadTimestamp}>}
+	 */
+	async uploadLargeFilePart(uploadDetails, partDetails, part, onUploadProgress) {
+		let headers = {
+			authorization: uploadDetails.authorizationToken,
+			'x-bz-part-number': partDetails.partNumber,
+			'content-length': partDetails.contentLength
+		};
+		
+		return await this._uploadFileOrPart(uploadDetails.uploadUrl, headers, part, onUploadProgress);
+	}
+	
+	/**
+	 *
+	 * @param {string} url
+	 * @param {object} headers
+	 * @param {string|Buffer|Stream.Readable} file
+	 * @param {function} [onUploadProgress]
+	 * @returns {Promise}
+	 * @private
+	 */
+	async _uploadFileOrPart(url, headers, file, onUploadProgress) {
+		headers['x-bz-content-sha1'] = 'hex_digits_at_end';
 		
 		// For some reason B2 doesn't like having hex_digits_at_end for small files.
 		// If this file is small (<= 1 MB), go ahead and load it all into memory and just hash it now.
-		if (fileDetails.contentLength <= 1000000) {
+		if (headers['content-length'] <= 1000000) {
 			file = await new Promise((resolve, reject) => {
-				let buf = Buffer.alloc(fileDetails.contentLength);
+				let buf = Buffer.alloc(headers['content-length']);
 				let offset = 0;
 				file.on('data', (chunk) => {
 					if (!Buffer.isBuffer(chunk)) {
@@ -84,24 +199,12 @@ class B2 {
 		if (!(file instanceof Stream.Readable)) {
 			let hash = Crypto.createHash('sha1');
 			hash.update(file);
-			sha1 = hash.digest('hex');
-		}
-		
-		let headers = {
-			authorization: uploadDetails.authorizationToken,
-			'x-bz-file-name': fileDetails.filename,
-			'content-type': fileDetails.contentType || 'b2/x-auto',
-			'content-length': fileDetails.contentLength + (sha1 == 'hex_digits_at_end' ? 40 : 0), // add 40 bytes for the hex-encoded sha1 trailer
-			'x-bz-content-sha1': sha1
-		};
-		
-		for (let i in (fileDetails.b2Info || {})) {
-			headers['x-bz-info-' + i] = fileDetails.b2Info[i];
+			headers['x-bz-content-sha1'] = hash.digest('hex');
 		}
 		
 		let res = await this._req({
 			method: 'POST',
-			url: uploadDetails.uploadUrl,
+			url,
 			headers,
 			onUploadProgress,
 			body: file
