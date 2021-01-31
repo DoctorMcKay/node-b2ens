@@ -183,6 +183,42 @@ class B2 {
 	}
 	
 	/**
+	 * Returns a list of unfinished large files in a bucket.
+	 * @param {string} bucketId
+	 * @param {{namePrefix?: string, startFileId?: string, maxFileCount?: int}} [options]
+	 * @returns {Promise<{files: array, nextFileId: string|null}>}
+	 */
+	async listUnfinishedLargeFiles(bucketId, options) {
+		let res = await this._req({
+			method: 'POST',
+			url: this.authorization.apiUrl + B2_API_PATH + '/b2_list_unfinished_large_files',
+			body: {
+				bucketId,
+				...(options || {}),
+			}
+		});
+		
+		return res.body;
+	}
+	
+	/**
+	 * Cancel an unfinished large file upload.
+	 * @param {string} fileId
+	 * @returns {Promise<{fileId, accountId, bucketId, fileName}>}
+	 */
+	async cancelUnfinishedLargeFile(fileId) {
+		let res = await this._req({
+			method: 'POST',
+			url: this.authorization.apiUrl + B2_API_PATH + '/b2_cancel_large_file',
+			body: {
+				fileId
+			}
+		});
+		
+		return res.body;
+	}
+	
+	/**
 	 *
 	 * @param {string} url
 	 * @param {object} headers
