@@ -1,6 +1,6 @@
 {
 	"name": "b2ens",
-	"version": "1.2.2",
+	"version": "1.3.0-beta.1",
 	"description": "Backblaze B2 Encrypt-n-Sync: a command-line application to synchronize a local directory to a B2 bucket",
 	"bin": {
 		"b2ens": "./bin/b2ens.js"
