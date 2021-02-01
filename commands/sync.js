@@ -1,4 +1,4 @@
-const B2 = require('backblaze-b2');
+const B2 = require('../b2/client.js');
 const Crypto = require('crypto');
 const FS = require('fs');
 const StdLib = require('@doctormckay/stdlib');
@@ -8,7 +8,7 @@ const Encryption = require('../components/encryption.js');
 const LAST_MODIFIED_KEY = 'src_last_modified_millis';
 const MAX_CONCURRENT_UPLOADS = 5; // used only for large files at the moment
 
-let g_UploadUrl;
+let g_UploadDetails;
 
 let syncfile = process.argv[3];
 if (!syncfile) {
@@ -48,10 +48,7 @@ if (err) {
 	process.exit(4);
 }
 
-let b2 = new B2({
-	"accountId": syncfile.accountId || syncfile.keyId,
-	"applicationKey": syncfile.applicationKey || syncfile.appKey
-});
+let b2 = new B2(syncfile.accountId || syncfile.keyId, syncfile.applicationKey || syncfile.appKey);
 
 let startTime = Date.now();
 main().then(() => {
@@ -83,11 +80,11 @@ async function main() {
 	}
 
 	await b2.authorize();
-	console.log(`Authorized with B2 account ${b2.accountId}; using API URL ${b2.apiUrl}`);
+	console.log(`Authorized with B2 account ${b2.authorization.accountId}; using API URL ${b2.authorization.apiUrl}`);
 
 	let bucket;
 	try {
-		bucket = await b2.getBucket({"bucketName": syncfile.remote.bucket});
+		bucket = await b2.getBuckets({bucketName: syncfile.remote.bucket});
 	} catch (ex) {
 		if (ex.response && ex.response.data && ex.response.data.code) {
 			console.error(`Invalid bucket: ${ex.response.data.code}`);
@@ -97,17 +94,25 @@ async function main() {
 		process.exit(5);
 	}
 
-	if (!bucket || !bucket.data.buckets || !bucket.data.buckets[0]) {
+	if (!bucket || !bucket.buckets || !bucket.buckets[0]) {
 		console.error('Cannot get bucket data: unknown error');
 		process.exit(5);
 	}
 
-	bucket = bucket.data.buckets[0];
+	bucket = bucket.buckets[0];
 	let prefixMsg = syncfile.remote.prefix ? ` prefix ${syncfile.remote.prefix}` : '';
 	console.log(`Syncing local directory ${syncfile.local.directory} with remote bucket ${bucket.bucketName} (${bucket.bucketId})${prefixMsg}`);
 
 	console.log('Listing files in bucket...');
-	let bucketFiles = await listBucketFiles(bucket.bucketId, syncfile.remote.prefix || '');
+	let {files} = await b2.listAllFileNames(bucket.bucketId, {prefix: syncfile.remote.prefix || ''});
+	let bucketFiles = {};
+	files.forEach((file) => {
+		if (syncfile.remote.prefix) {
+			file.fileName = file.fileName.replace(syncfile.remote.prefix, ''); // replaces the first occurrence only
+		}
+		
+		bucketFiles[file.fileName] = file;
+	});
 
 	console.log('Examining local directory...');
 	let localFiles = listLocalFiles(syncfile.local.directory, syncfile.local.exclude || []);
@@ -131,40 +136,8 @@ async function main() {
 			await hideRemoteFile(bucketFiles[i], syncfile.remote.prefix || '');
 		}
 	}
-
-	// not yet implemented in backblaze-b2
-	//await cancelUnfinishedLargeFiles();
-}
-
-async function listBucketFiles(bucketId, prefix) {
-	let files = {};
-	let startFileName = '';
-
-	do {
-		let response = await b2.listFileNames({
-			bucketId,
-			startFileName,
-			prefix,
-			maxFileCount: 10000
-		});
-
-		if (!response.data.files) {
-			console.error('Unknown error listing bucket files');
-			process.exit(5);
-		}
-
-		response.data.files.forEach((file) => {
-			if (prefix) {
-				file.fileName = file.fileName.replace(prefix, ''); // replaces only the first occurrence
-			}
-
-			files[file.fileName] = file;
-		});
-
-		startFileName = response.data.nextFileName;
-	} while (startFileName);
-
-	return files;
+	
+	await cancelUnfinishedLargeFiles(bucket.bucketId);
 }
 
 /**
@@ -200,13 +173,13 @@ function listLocalFiles(directory, exclude, prefix, files) {
 }
 
 async function uploadLocalFile(bucketId, file, publicKey, why, prefix) {
-	if (file.stat.size > 10000000) {
-		// More than 10 MB
+	if (file.stat.size > 100 * 1000 * 1000) {
+		// More than 100 MB
 		return await uploadLargeLocalFile(bucketId, file, publicKey, prefix);
 	}
 
 	let eol = process.stdout.isTTY ? '' : '\n';
-	process.stdout.write(`Uploading ${why} file ${file.fileName}... encrypting ${eol}`);
+	process.stdout.write(`Uploading ${why} file ${file.fileName}... ${eol}`);
 
 	let data = await new Promise((resolve) => {
 		let encrypt = Encryption.createEncryptStream(publicKey);
@@ -242,26 +215,31 @@ async function uploadLocalFile(bucketId, file, publicKey, why, prefix) {
 	process.stdout.write(`Uploading ${why} file ${file.fileName}... ${eol}`);
 
 	try {
-		let uploadUrl = await getUploadUrl(bucketId);
-		let response = await b2.uploadFile({
-			uploadUrl: uploadUrl.uploadUrl,
-			uploadAuthToken: uploadUrl.uploadAuthToken,
-			fileName: prefix + file.fileName,
-			data,
-			// Workaround for backblaze-b2 bug #68 - https://github.com/yakovkhalinsky/backblaze-b2/issues/68
-			axios: {
-				headers: {
-					[`X-Bz-Info-${LAST_MODIFIED_KEY}`]: file.stat.mtimeMs
-				}
+		let read = FS.createReadStream(file.fullPath);
+		let encrypt = Encryption.createEncryptStream(publicKey);
+		read.pipe(encrypt);
+		
+		let uploadDetails = await getUploadDetails(bucketId);
+		let response = await b2.uploadFile(uploadDetails, {
+			filename: prefix + file.fileName,
+			contentLength: file.stat.size + encrypt.overheadLength,
+			b2Info: {
+				[LAST_MODIFIED_KEY]: file.stat.mtimeMs
+			}
+		}, encrypt, (progress) => {
+			if (process.stdout.isTTY) {
+				let pct = Math.floor((progress.processedBytes / file.stat.size) * 100);
+				process.stdout.clearLine(0);
+				process.stdout.write(`\rUploading ${why} file ${file.fileName}... ${pct}% (${StdLib.Units.humanReadableBytes(progress.processedBytes)}) `);
 			}
 		});
 
 		console.log(`complete`);
 
-		return response.data;
+		return response;
 	} catch (ex) {
 		if (ex.response && ex.response.data && ex.response.data.code && ['bad_auth_token', 'expired_auth_token', 'service_unavailable'].includes(ex.response.data.code)) {
-			g_UploadUrl = null;
+			g_UploadDetails = null;
 			return await uploadLocalFile(bucketId, file, publicKey);
 		} else {
 			throw ex;
@@ -273,86 +251,74 @@ async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries =
 	let eol = process.stdout.isTTY ? '' : '\n';
 	process.stdout.write(`Uploading large file ${file.fileName}... preparing ${eol}`);
 
-	let chunkSize = Math.max(5000000, Math.ceil(file.stat.size / 10000)); // minimum 5 MB for each chunk
+	let chunkSize = Math.max(50 * 1000 * 1000, Math.ceil(file.stat.size / 10000)); // minimum 50 MB for each chunk
 	let readStream = FS.createReadStream(file.fullPath);
-	let encrypt = Encryption.createEncryptStream(publicKey, {"highWaterMark": chunkSize * 2});
+	let encrypt = Encryption.createEncryptStream(publicKey, {highWaterMark: chunkSize * 2});
 	readStream.pipe(encrypt);
 	
 	// TODO handle stream errors
-
-	let response = await b2.startLargeFile({
-		bucketId,
-		"fileName": prefix + file.fileName,
-		// backblaze-b2 doesn't support fileInfo in this method
-		"axios": {
-			"data": {
-				"fileInfo": {
-					[LAST_MODIFIED_KEY]: file.stat.mtimeMs.toString()
-				}
-			}
+	
+	let response = await b2.startLargeFile(bucketId, {
+		filename: prefix + file.fileName,
+		b2Info: {
+			[LAST_MODIFIED_KEY]: file.stat.mtimeMs.toString()
 		}
 	});
 
-	if (!response.data.fileId) {
+	if (!response.fileId) {
 		console.error(`Did not get a file ID uploading large file ${file.fileName}`);
 		process.exit(5);
 	}
 
-	let fileId = response.data.fileId;
+	let fileId = response.fileId;
 
 	let partHashes = [];
+	let processedChunks = 0;
 	let bytesUploaded = 0; // this won't be exact because we're counting encrypted bytes, but it's close enough
 
 	let ended = false;
 	encrypt.on('end', () => ended = true);
+	
+	if (process.stdout.isTTY) {
+		process.stdout.clearLine(0);
+		process.stdout.write(`\rUploading large file ${file.fileName}... 0% ${eol}`);
+	}
 
 	// Spin up some "threads" (promises) to handle uploading
 	let uploadThreads = [];
 	for (let i = 0; i < (syncfile.uploadThreads || MAX_CONCURRENT_UPLOADS); i++) {
 		uploadThreads.push(new Promise(async (resolve) => {
-			let uploadUrl, uploadAuthToken, data;
+			let uploadDetails, data;
 
 			while ((data = await getNextChunk()) !== null) {
-				let chunkId = partHashes.length;
-				let hash = sha1(data);
-				partHashes.push(hash);
+				let chunkId = processedChunks++;
 
 				let attempts = 0;
 				let err = null;
 				do {
 					try {
-						if (!uploadUrl) {
-							let response = await b2.getUploadPartUrl({fileId});
-							if (!response.data || !response.data.uploadUrl || !response.data.authorizationToken) {
-								throw new Error(`Did not get upload URL for uploading large file ${file.fileName}`);
-							}
-							
-							uploadUrl = response.data.uploadUrl;
-							uploadAuthToken = response.data.authorizationToken;
+						if (!uploadDetails) {
+							uploadDetails = await b2.getLargeFilePartUploadDetails(fileId);
 						}
 					
-						await b2.uploadPart({
+						let uploadResult = await b2.uploadLargeFilePart(uploadDetails, {
 							partNumber: chunkId + 1,
-							uploadUrl,
-							uploadAuthToken,
-							data,
-							hash
-						});
+							contentLength: data.length
+						}, data);
 
 						// part upload succeeded
 						bytesUploaded += data.length;
+						partHashes[chunkId] = uploadResult.contentSha1;
 						break;
 					} catch (ex) {
 						if (
-							ex.message.includes('Did not get upload URL') || (
-								ex.response &&
-								ex.response.data &&
-								ex.response.data.code &&
-								['internal_error', 'bad_auth_token', 'expired_auth_token', 'service_unavailable'].includes(ex.response.data.code)
-							)
+							ex.response &&
+							ex.response.data &&
+							ex.response.data.code &&
+							['internal_error', 'bad_auth_token', 'expired_auth_token', 'service_unavailable'].includes(ex.response.data.code)
 						) {
 							// we'll get a new upload url and try again
-							uploadUrl = null;
+							uploadDetails = null;
 						} else {
 							err = ex;
 						}
@@ -385,16 +351,13 @@ async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries =
 	}
 
 	try {
-		await b2.finishLargeFile({
-			fileId,
-			partSha1Array: partHashes
-		});
+		await b2.finishLargeFile(fileId, partHashes);
 	} catch (ex) {
 		if (process.stdout.isTTY) {
 			process.stdout.clearLine(0);
 			process.stdout.write("\r");
 		}
-
+		
 		console.log(`Uploading large file ${file.fileName}... ERROR: ${ex.message}`);
 
 		if (retries >= 5) {
@@ -429,24 +392,16 @@ async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries =
 
 async function hideRemoteFile(file, prefix) {
 	console.log(`Hiding missing remote file ${file.fileName}`);
-	await b2.hideFile({
-		"bucketId": file.bucketId,
-		"fileName": prefix + file.fileName
-	});
+	await b2.hideFile(file.bucketId, prefix + file.fileName);
 }
 
-async function getUploadUrl(bucketId) {
-	if (g_UploadUrl) {
-		return g_UploadUrl;
+async function getUploadDetails(bucketId) {
+	if (g_UploadDetails) {
+		return g_UploadDetails;
 	}
 
-	let response = await b2.getUploadUrl(bucketId);
-	if (!response.data || !response.data.uploadUrl || !response.data.authorizationToken) {
-		throw new Error('Malformed response when getting upload URL');
-	}
-
-	g_UploadUrl = {"uploadUrl": response.data.uploadUrl, "uploadAuthToken": response.data.authorizationToken};
-	return g_UploadUrl;
+	g_UploadDetails = await b2.getUploadDetails(bucketId);
+	return g_UploadDetails;
 }
 
 function sha1(data) {
@@ -456,14 +411,11 @@ function sha1(data) {
 }
 
 async function cancelUnfinishedLargeFiles(bucketId) {
-	let response = await b2.listUnfinishedLargeFiles({bucketId});
-	if (response.data || !response.data.files) {
-		return;
-	}
+	let {files} = await b2.listAllUnfinishedLargeFiles(bucketId);
 
-	console.log(`Found ${response.data.files.length} unfinished large files to cancel`);
-	for (let i = 0; i < response.data.files.length; i++) {
-		await b2.cancelLargeFile({"fileId": response.data.files[i].fileId});
-		console.log(`Canceled large file ${response.data.files[i].fileId}`);
+	console.log(`Found ${files.length} unfinished large files to cancel`);
+	for (let i = 0; i < files.length; i++) {
+		await b2.cancelUnfinishedLargeFile(files[i].fileId);
+		console.log(`Canceled large file ${files[i].fileId}`);
 	}
 }

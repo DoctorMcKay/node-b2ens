@@ -208,7 +208,9 @@ class B2 {
 	 * @returns {Promise<{files: *[]}>}
 	 */
 	async listAllUnfinishedLargeFiles(bucketId, options) {
-		return await this._listAll(this.listUnfinishedLargeFiles, bucketId, options);
+		let opts = Object.assign({}, options);
+		opts.maxFileCount = 100;
+		return await this._listAll(this.listUnfinishedLargeFiles, bucketId, opts);
 	}
 	
 	/**
@@ -260,10 +262,13 @@ class B2 {
 			});
 		}
 		
-		if (!(file instanceof Stream.Readable)) {
+		if (typeof file.pipe != 'function') {
 			let hash = Crypto.createHash('sha1');
 			hash.update(file);
 			headers['x-bz-content-sha1'] = hash.digest('hex');
+		} else {
+			// We are uploading a stream, which wil go through B2UploadStream, so we need to add 40 bytes for the sha1 trailer
+			headers['content-length'] += 40;
 		}
 		
 		let res = await this._req({
@@ -326,8 +331,7 @@ class B2 {
 	}
 	
 	async _listAll(method, bucketId, options) {
-		let opts = Object.assign({}, options);
-		opts.maxFileCount = 10000;
+		let opts = Object.assign({maxFileCount: 10000}, options);
 		delete opts.startFileId;
 		delete opts.startFileName;
 		
@@ -436,7 +440,7 @@ class B2 {
 			
 			req.on('error', reject);
 			
-			if (params.body && params.body instanceof Stream.Readable) {
+			if (params.body && typeof params.body == 'object' && typeof params.body.pipe == 'function') {
 				let uploadStream = new B2UploadStream(params.onUploadProgress);
 				Stream.pipeline(
 					params.body,
