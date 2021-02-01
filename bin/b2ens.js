@@ -23,6 +23,6 @@ switch (command) {
 		break;
 
 	default:
-		console.error('Usage: b2ens <command>\n  Available commands:\n    - sync\n    - decrypt-file\n    - encrypt-file\n    - generate-keypair\n    - generate-syncfile');
+		console.error('B2 Encrypt-n-Sync ' + require('../package.json').version + '\nUsage: b2ens <command>\n  Available commands:\n    - sync\n    - decrypt-file\n    - encrypt-file\n    - generate-keypair\n    - generate-syncfile\n');
 		process.exit(1);
 }
