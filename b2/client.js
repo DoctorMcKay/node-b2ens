@@ -396,6 +396,12 @@ class B2 {
 					res.on('error', reject);
 					res.on('data', chunk => data += chunk.toString('utf8'));
 					res.on('end', async () => {
+						try {
+							data = JSON.parse(data);
+						} catch (ex) {
+							// invalid json I guess
+						}
+						
 						if (res.statusCode > 300) {
 							if (['bad_auth_token', 'expired_auth_token'].includes(data.code) && !url.path.match(/\/b2_upload_(file|part)/) && !params._authRetry) {
 								// Our auth token is expired, so get a new one
@@ -407,7 +413,8 @@ class B2 {
 								}
 							}
 							
-							let err = new Error(data.message || `HTTP error ${res.statusCode}`);
+							let err = new Error(data.message || data.code || `HTTP error ${res.statusCode}`);
+							err.requestUrl = params.url;
 							err.status = res.statusCode;
 							err.headers = res.headers;
 							err.body = data;
