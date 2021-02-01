@@ -13,6 +13,8 @@ class B2 {
 		this._appKeyId = appKeyId;
 		this._appKey = appKey;
 		
+		this._agent = new HTTPS.Agent({keepAlive: true});
+		
 		this.authorization = null;
 	}
 	
@@ -391,6 +393,7 @@ class B2 {
 			}
 			
 			let req = HTTPS.request({
+				agent: this._agent,
 				protocol: 'https:',
 				method: params.method || 'GET',
 				hostname: url.hostname,
