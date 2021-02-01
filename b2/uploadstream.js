@@ -22,7 +22,7 @@ class B2UploadStream extends Stream.Transform {
 				processedBytes: this.processedBytes,
 				ended: false
 			});
-		}, 100);
+		}, 500);
 	}
 	
 	_transform(chunk, encoding, callback) {
