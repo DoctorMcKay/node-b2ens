@@ -424,7 +424,7 @@ class B2 {
 						resolve({
 							status: res.statusCode,
 							headers: res.headers,
-							body: JSON.parse(data)
+							body: data
 						});
 					});
 				} else {
