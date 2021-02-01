@@ -202,6 +202,16 @@ class B2 {
 	}
 	
 	/**
+	 * Returns a list of all unfinished large files in a bucket.
+	 * @param {string} bucketId
+	 * @param {{namePrefix?: string, startFileId?: string, maxFileCount?: int}} [options]
+	 * @returns {Promise<{files: *[]}>}
+	 */
+	async listAllUnfinishedLargeFiles(bucketId, options) {
+		return await this._listAll(this.listUnfinishedLargeFiles, bucketId, options);
+	}
+	
+	/**
 	 * Cancel an unfinished large file upload.
 	 * @param {string} fileId
 	 * @returns {Promise<{fileId, accountId, bucketId, fileName}>}
@@ -287,6 +297,16 @@ class B2 {
 	}
 	
 	/**
+	 * List all files in bucket by name.
+	 * @param {string} bucketId
+	 * @param {{startFileName?: string, maxFileCount?: int, prefix?: string, delimiter?: string}} [options]
+	 * @returns {Promise<{files: array}>}
+	 */
+	async listAllFileNames(bucketId, options) {
+		return await this._listAll(this.listFileNames, bucketId, options);
+	}
+	
+	/**
 	 * Hide a file.
 	 * @param {string} bucketId
 	 * @param {string} filename
@@ -303,6 +323,25 @@ class B2 {
 		});
 		
 		return res.body;
+	}
+	
+	async _listAll(method, bucketId, options) {
+		let opts = Object.assign({}, options);
+		opts.maxFileCount = 10000;
+		delete opts.startFileId;
+		delete opts.startFileName;
+		
+		let files = [];
+		let startKeyName;
+		do {
+			let res = await method.call(this, bucketId, opts);
+			files = files.concat(res.files);
+			let nextKeyName = Object.keys(res).find(key => key.startsWith('next'));
+			startKeyName = nextKeyName.replace('next', 'start');
+			opts[startKeyName] = res[nextKeyName];
+		} while (opts[startKeyName]);
+		
+		return {files};
 	}
 	
 	/**
@@ -339,15 +378,6 @@ class B2 {
 			let url = URL.parse(params.url);
 			
 			headers['user-agent'] = 'node-b2ens/' + require('../package.json').version;
-			
-			console.log({
-				protocol: 'https:',
-				method: params.method || 'GET',
-				hostname: url.hostname,
-				port: url.port,
-				path: url.path,
-				headers,
-			});
 			
 			let req = HTTPS.request({
 				protocol: 'https:',
