@@ -383,6 +383,13 @@ class B2 {
 			
 			headers['user-agent'] = 'node-b2ens/' + require('../package.json').version;
 			
+			// Percent encode Bz headers
+			for (let i in headers) {
+				if (i.startsWith('x-bz-')) {
+					headers[i] = encodeURIComponent(headers[i]);
+				}
+			}
+			
 			let req = HTTPS.request({
 				protocol: 'https:',
 				method: params.method || 'GET',
