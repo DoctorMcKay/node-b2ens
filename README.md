@@ -83,8 +83,11 @@ A *syncfile* is a JSON file containing the configuration for a sync. It should l
 Each file is encrypted using `AES-256-CTR` with a per-file key. The symmetric key is RSA-encrypted and stored in the
 uploaded file alongside the encrypted data. The final 20 bytes of each uploaded file are a HMAC.
 
-Files under 10 MB in size are encrypted in memory and then uploaded whole. Files larger than 10 MB are encrypted as a
-stream and uploaded in chunks at least 5 MB in size.
+Files under 100 MB are streamed from disk, encrypted as a stream, and uploaded in a single part.
+Files larger than 100 MB will be uploaded in chunks at most 50 MB in size.
+**Please note:** Due to the nature of multi-threaded encrypted uploads, each chunk in a large file must be loaded into
+memory prior to being uploaded. Therefore, a large-file upload will consume at least `uploadThreads` × 50 MB. Please
+take this into consideration on a device with limited RAM (e.g. a Raspberry Pi).
 
 Currently it is possible to decrypt files, but only individually. Eventually there will be a command to download and
 decrypt the entire bucket.
