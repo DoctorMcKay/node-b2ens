@@ -86,8 +86,8 @@ async function main() {
 	try {
 		bucket = await b2.getBuckets({bucketName: syncfile.remote.bucket});
 	} catch (ex) {
-		if (ex.response && ex.response.data && ex.response.data.code) {
-			console.error(`Invalid bucket: ${ex.response.data.code}`);
+		if (ex.body && ex.body.code) {
+			console.error(`Invalid bucket: ${ex.body.code}`);
 		} else {
 			console.error(`Invalid bucket: ${ex.message}`);
 		}
@@ -238,7 +238,7 @@ async function uploadLocalFile(bucketId, file, publicKey, why, prefix) {
 
 		return response;
 	} catch (ex) {
-		if (ex.response && ex.response.data && ex.response.data.code && ['bad_auth_token', 'expired_auth_token', 'service_unavailable'].includes(ex.response.data.code)) {
+		if (ex.body && ex.body.code && ['bad_auth_token', 'expired_auth_token', 'service_unavailable'].includes(ex.body.code)) {
 			g_UploadDetails = null;
 			return await uploadLocalFile(bucketId, file, publicKey);
 		} else {
@@ -312,10 +312,9 @@ async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries =
 						break;
 					} catch (ex) {
 						if (
-							ex.response &&
-							ex.response.data &&
-							ex.response.data.code &&
-							['internal_error', 'bad_auth_token', 'expired_auth_token', 'service_unavailable'].includes(ex.response.data.code)
+							ex.body &&
+							ex.body.code &&
+							['internal_error', 'bad_auth_token', 'expired_auth_token', 'service_unavailable'].includes(ex.body.code)
 						) {
 							// we'll get a new upload url and try again
 							uploadDetails = null;
