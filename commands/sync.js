@@ -230,7 +230,7 @@ async function uploadLocalFile(bucketId, file, publicKey, why, prefix) {
 			if (process.stdout.isTTY) {
 				let pct = Math.floor((progress.processedBytes / file.stat.size) * 100);
 				process.stdout.clearLine(0);
-				process.stdout.write(`\rUploading ${why} file ${file.fileName}... ${pct}% (${StdLib.Units.humanReadableBytes(progress.processedBytes)}) `);
+				process.stdout.write(`\rUploading ${why} file ${file.fileName}... ${pct}% (${StdLib.Units.humanReadableBytes(progress.processedBytes, false, true)}) `);
 			}
 		});
 
