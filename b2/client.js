@@ -242,12 +242,14 @@ class B2 {
 	 * @private
 	 */
 	async _uploadFileOrPart(url, headers, file, onUploadProgress) {
-		headers['x-bz-content-sha1'] = 'hex_digits_at_end';
+		let fileIsStream = typeof file.pipe == 'function';
 		
 		// For some reason B2 doesn't like having hex_digits_at_end for small files.
 		// If this file is small (<= 1 MB), go ahead and load it all into memory and just hash it now.
-		if (headers['content-length'] <= 1000000) {
+		if (fileIsStream && headers['content-length'] <= 1000000) {
 			file = await new Promise((resolve, reject) => {
+				fileIsStream = false;
+				
 				let buf = Buffer.alloc(headers['content-length']);
 				let offset = 0;
 				file.on('data', (chunk) => {
@@ -264,13 +266,14 @@ class B2 {
 			});
 		}
 		
-		if (typeof file.pipe != 'function') {
+		if (!fileIsStream) {
 			let hash = Crypto.createHash('sha1');
 			hash.update(file);
 			headers['x-bz-content-sha1'] = hash.digest('hex');
 		} else {
 			// We are uploading a stream, which wil go through B2UploadStream, so we need to add 40 bytes for the sha1 trailer
 			headers['content-length'] += 40;
+			headers['x-bz-content-sha1'] = 'hex_digits_at_end';
 		}
 		
 		let res = await this._req({
