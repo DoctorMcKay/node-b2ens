@@ -101,7 +101,7 @@ If you wanted to decrypt an entire bucket, you might want to either
 or use the [B2 command line tool](https://www.backblaze.com/b2/docs/quick_command_line.html) to download your bucket
 contents. Once downloaded, you can use the `decrypt-folder` command to decrypt the entire bucket's contents.
 
-Please note that the `decrypt-folder` command does not decrypt the files in-place, and rather it decrypts the files to
-a new folder. This is done so that it is more apparent if any files were unable to be decrypted, since they will simply
-be missing from your decrypted folder rather than present, but encrypted. Consequently, you will need at least enough
-free disk space to hold two copies of your files.
+**Please note that the `decrypt-folder` command will delete input files after they are successfully decrypted to the
+output folder.** This is to prevent it being necessary to have enough free disk space to hold two copies of the files.
+Additionally, this makes it apparent if any files were unable to be decrypted, since they will be all that's left in
+the input folder after the process completes.

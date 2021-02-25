@@ -10,7 +10,7 @@ const readDirRecursively = require('../components/readDirRecursively.js');
 	let outputFolderPath = process.argv[5];
 	
 	if (!folderPath || !keyPath || !outputFolderPath) {
-		console.error('Usage: b2ens decrypt-folder <path to folder> <path to PEM-encoded private key> <path to output folder>');
+		console.error('Usage: b2ens decrypt-folder <path to PEM-encoded private key> <path to folder> <path to output folder>');
 		process.exit(2);
 	}
 	
@@ -35,6 +35,16 @@ const readDirRecursively = require('../components/readDirRecursively.js');
 			FS.mkdirSync(outputDir, {recursive: true});
 			await encryptOrDecryptFile('decrypt', key, file.path, outputPath);
 			countSuccess++;
+			
+			FS.unlinkSync(file.path);
+			let dir = file.path;
+			
+			// Delete the parent folders if they're empty
+			while ((dir = Path.dirname(dir)) != folderPath) {
+				if (FS.readdirSync(dir).length == 0) {
+					FS.rmdirSync(dir);
+				}
+			}
 		} catch (ex) {
 			countFailure++;
 			console.error(`Failed to decrypt ${file.path}: ${ex.message}`);
