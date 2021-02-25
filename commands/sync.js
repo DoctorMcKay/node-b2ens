@@ -124,7 +124,7 @@ async function main() {
 		} else {
 			if (!bucketFiles[i].fileInfo || !bucketFiles[i].fileInfo[LAST_MODIFIED_KEY]) {
 				console.log(`Warning: File ${i} is missing a modification time`);
-			} else if (bucketFiles[i].fileInfo[LAST_MODIFIED_KEY] != localFiles[i].stat.mtimeMs) {
+			} else if (bucketFiles[i].fileInfo[LAST_MODIFIED_KEY] != Math.floor(localFiles[i].stat.mtimeMs)) {
 				await uploadLocalFile(bucket.bucketId, localFiles[i], publicKey, 'modified', syncfile.remote.prefix || '');
 			}
 		}
@@ -224,7 +224,7 @@ async function uploadLocalFile(bucketId, file, publicKey, why, prefix) {
 			filename: prefix + file.fileName,
 			contentLength: file.stat.size + encrypt.overheadLength,
 			b2Info: {
-				[LAST_MODIFIED_KEY]: file.stat.mtimeMs
+				[LAST_MODIFIED_KEY]: Math.floor(file.stat.mtimeMs)
 			}
 		}, encrypt, (progress) => {
 			if (process.stdout.isTTY) {
@@ -261,7 +261,7 @@ async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries =
 	let response = await b2.startLargeFile(bucketId, {
 		filename: prefix + file.fileName,
 		b2Info: {
-			[LAST_MODIFIED_KEY]: file.stat.mtimeMs.toString()
+			[LAST_MODIFIED_KEY]: Math.floor(file.stat.mtimeMs).toString()
 		}
 	});
 
