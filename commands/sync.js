@@ -321,6 +321,8 @@ async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries =
 						} else {
 							err = ex;
 						}
+						
+						await StdLib.Promises.sleepAsync(5000); // wait 5 seconds
 					}
 				} while (++attempts <= 5);
 
