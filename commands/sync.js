@@ -296,6 +296,9 @@ async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries =
 				let attempts = 0;
 				let err = null;
 				do {
+					// Reset err or else we will think we had an error even if this succeeds
+					err = null;
+					
 					try {
 						if (!uploadDetails) {
 							uploadDetails = await b2.getLargeFilePartUploadDetails(fileId);
@@ -311,10 +314,10 @@ async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries =
 						partHashes[chunkId] = uploadResult.contentSha1;
 						break;
 					} catch (ex) {
+						let exCode = ex.body && ex.body.code;
 						if (
-							ex.body &&
-							ex.body.code &&
-							['internal_error', 'bad_auth_token', 'expired_auth_token', 'service_unavailable'].includes(ex.body.code)
+							ex.code == 'ECONNRESET' ||
+							(exCode && ['internal_error', 'bad_auth_token', 'expired_auth_token', 'service_unavailable'].includes(exCode))
 						) {
 							// we'll get a new upload url and try again
 							uploadDetails = null;
