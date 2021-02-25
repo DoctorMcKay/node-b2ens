@@ -322,12 +322,16 @@ async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries =
 							err = ex;
 						}
 						
+						console.error(`\nError uploading large file: ${ex.message}`);
 						await StdLib.Promises.sleepAsync(5000); // wait 5 seconds
 					}
-				} while (++attempts <= 5);
+				} while (++attempts <= 10);
 
 				if (err) {
-					throw err;
+					// Fatal error
+					console.error(`\nFatal error uploading large file ${file.fileName}`);
+					console.error(err);
+					process.exit(5);
 				}
 
 				// Chunk upload succeeded
