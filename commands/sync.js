@@ -341,7 +341,7 @@ async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries =
 				if (process.stdout.isTTY) {
 					let pct = Math.floor((bytesUploaded / file.stat.size) * 100);
 					process.stdout.clearLine(0);
-					process.stdout.write(`\rUploading large file ${file.fileName}... ${pct}% `);
+					process.stdout.write(`\rUploading large file ${file.fileName}... ${pct}% (${StdLib.Units.humanReadableBytes(bytesUploaded)}) `);
 				}
 			} // get next chunk
 
