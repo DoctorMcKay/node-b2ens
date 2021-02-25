@@ -166,6 +166,11 @@ class DecryptStream extends Stream.Transform {
 		if (flushed.data && flushed.data.length > 0) {
 			this._processBuffer(flushed.data);
 		}
+		
+		if (!this._hmac) {
+			this.destroy(new Error('File header is invalid'));
+			return callback();
+		}
 
 		let mac = this._hmac.digest();
 		if (!mac.equals(flushed.hmac)) {

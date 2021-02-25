@@ -7,7 +7,7 @@ if (!publicKeyOutputFile || !privateKeyOutputFile) {
 	process.exit(2);
 }
 
-const generateKeypair = require('./_generate_keypair.js');
+const generateKeypair = require('../components/generateKeypair.js');
 let keypair = generateKeypair();
 
 FS.writeFileSync(publicKeyOutputFile, keypair.publicKey);

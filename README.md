@@ -38,6 +38,8 @@ $ b2ens generate-syncfile
 $ b2ens encrypt-file <path to public or private key> <input file path> [output file path]
 
 $ b2ens decrypt-file <path to private key> <input file path> [output file path] 
+
+$ b2ens decrypt-folder <path to private key> <input folder path> <output folder path>
 ```
 
 # Syncfiles
@@ -89,5 +91,17 @@ Files larger than 100 MB will be uploaded in chunks at most 50 MB in size.
 memory prior to being uploaded. Therefore, a large-file upload will consume at least `uploadThreads` × 50 MB. Please
 take this into consideration on a device with limited RAM (e.g. a Raspberry Pi).
 
-Currently it is possible to decrypt files, but only individually. Eventually there will be a command to download and
-decrypt the entire bucket.
+# Decryption
+
+There is no functionality implemented in B2ENS to download and decrypt files. You will need to download either an
+individual file or some number of files and use either `decrypt-file` or `decrypt-folder` to decrypt them.
+
+If you wanted to decrypt an entire bucket, you might want to either
+[create and download a bucket snapshot](https://help.backblaze.com/hc/en-us/articles/115002731014-Snapshot-information)
+or use the [B2 command line tool](https://www.backblaze.com/b2/docs/quick_command_line.html) to download your bucket
+contents. Once downloaded, you can use the `decrypt-folder` command to decrypt the entire bucket's contents.
+
+Please note that the `decrypt-folder` command does not decrypt the files in-place, and rather it decrypts the files to
+a new folder. This is done so that it is more apparent if any files were unable to be decrypted, since they will simply
+be missing from your decrypted folder rather than present, but encrypted. Consequently, you will need at least enough
+free disk space to hold two copies of your files.

@@ -1,6 +1,6 @@
 const Crypto = require('crypto');
 
-module.exports = function() {
+function generateKeypair() {
 	if (!Crypto.generateKeyPairSync) {
 		process.stderr.write("Error: Node.js 10.12.0 or later is required to generate a keypair.");
 		process.exit(1);
@@ -17,4 +17,6 @@ module.exports = function() {
 			format: 'pem'
 		}
 	});
-};
+}
+
+module.exports = generateKeypair;

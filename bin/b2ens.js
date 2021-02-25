@@ -1,28 +1,22 @@
 #!/usr/bin/env node
 
+const AVAILABLE_COMMANDS = [
+	'sync',
+	'decrypt-file',
+	'decrypt-folder',
+	'encrypt-file',
+	'generate-keypair',
+	'generate-syncfile'
+];
+
 let command = process.argv[2];
-switch (command) {
-	case 'sync':
-		require('../commands/sync.js');
-		break;
-
-	case 'decrypt-file':
-		require('../commands/decrypt-file.js');
-		break;
-
-	case 'encrypt-file':
-		require('../commands/encrypt-file.js');
-		break;
-
-	case 'generate-keypair':
-		require('../commands/generate-keypair.js');
-		break;
-		
-	case 'generate-syncfile':
-		require('../commands/generate-syncfile.js');
-		break;
-
-	default:
-		console.error('B2 Encrypt-n-Sync ' + require('../package.json').version + '\nUsage: b2ens <command>\n  Available commands:\n    - sync\n    - decrypt-file\n    - encrypt-file\n    - generate-keypair\n    - generate-syncfile\n');
-		process.exit(1);
+if (AVAILABLE_COMMANDS.includes(command)) {
+	require(`../commands/${command}.js`);
+} else {
+	let {version} = require('../package.json');
+	console.error(`B2 Encrypt-n-Sync ${version}`);
+	console.error('Usage: b2ens <command>');
+	console.error('Available commands:');
+	console.error(AVAILABLE_COMMANDS.map(c => `  - ${c}`).join('\n'));
+	process.exit(1);
 }

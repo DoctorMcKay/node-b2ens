@@ -1,7 +1,7 @@
 const FS = require('fs');
 const ReadLine = require('readline');
 
-const generateKeypair = require('./_generate_keypair.js');
+const generateKeypair = require('../components/generateKeypair.js');
 let keypair = generateKeypair();
 
 (async function() {
