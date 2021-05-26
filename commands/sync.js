@@ -287,12 +287,29 @@ async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries =
 	
 	// TODO handle stream errors
 	
-	let response = await b2.startLargeFile(bucketId, {
-		filename: prefix + file.fileName,
-		b2Info: {
-			[LAST_MODIFIED_KEY]: Math.floor(file.stat.mtimeMs).toString()
+	let response;
+	try {
+		response = await b2.startLargeFile(bucketId, {
+			filename: prefix + file.fileName,
+			b2Info: {
+				[LAST_MODIFIED_KEY]: Math.floor(file.stat.mtimeMs).toString()
+			}
+		});
+	} catch (ex) {
+		if (process.stdout.isTTY) {
+			process.stdout.clearLine(0);
+			process.stdout.write('\r');
 		}
-	});
+		process.stdout.write(`Uploading large file ${file.fileName}... ${ex.message} \n`);
+		
+		if (retries >= 5) {
+			console.log(`Large file ${file.fileName} failed fatally`);
+			return;
+		}
+		
+		await StdLib.Promises.sleepAsync(2000);
+		return await uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries + 1);
+	}
 
 	if (!response.fileId) {
 		console.error(`Did not get a file ID uploading large file ${file.fileName}`);
