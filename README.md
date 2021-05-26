@@ -70,6 +70,15 @@ A *syncfile* is a JSON file containing the configuration for a sync. It should l
 	- `exclude` - An optional array of files and/or directories to exclude
 		- For example, if you are backing up `/var/www/html`, then you would set `local.directory` = `/var/www/html`
 		- If you wanted to exclude `/var/www/html/some-dir` and `/var/www/html/some-file`, then you would set `local.exclude` to `["/var/www/html/some-dir", "/var/www/html/some-file"]`
+		- As of v1.5.0, it is possible to use wildcards in exclusions
+			- To signal that an exclusion contains wildcards, prefix it with `!`
+			- `*` is interpreted as zero or more characters, excluding slashes
+			- `**` is interpreted as zero or more characters, including slashes
+			- If you want to exclude an entire directory and all its subdirectories, you should end your string with `/**`
+			- Examples:
+				- `!/var/www/html/some-dir/**` will match all files and subdirectories in `/var/www/html/some-dir`
+				- `!/var/www/html/users/*/some-file` will match all files by name `some-file` contained within all directories in `/var/www/html/users`
+				- `!/var/www/html/users/*/some-dir/**` will match all files and subdirectories in the `some-dir` directory contained within all directories in `/var/www/html/users`
 - `remote`
 	- `bucket` - The name of the bucket (not the bucket ID) you want to back up to
 	- `prefix` - If you want your backup root in the remote bucket to be in a folder, put the full path to the folder relative to the bucket root here. No leading slash, trailing slash required. Example: "somefolder/" or "some/folder/". If you omit the trailing slash, then all files will be uploaded to the bucket root, but with this value prefixed to their filenames. For example, a prefix of "foo" will cause a file named "test.txt" to be uploaded as "footest.txt".
