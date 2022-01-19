@@ -241,7 +241,7 @@ async function uploadLocalFile(bucketId, file, publicKey, why, prefix, retryCoun
 
 		return response;
 	} catch (ex) {
-		if (retryCount < 5 && ex.body && ex.body.code && ['bad_auth_token', 'expired_auth_token', 'service_unavailable'].includes(ex.body.code)) {
+		if (retryCount < 5) {
 			g_UploadDetails = null;
 			return await uploadLocalFile(bucketId, file, publicKey, why, prefix, retryCount + 1);
 		} else {
