@@ -188,7 +188,8 @@ class B2 {
 		let headers = {
 			authorization: uploadDetails.authorizationToken,
 			'x-bz-part-number': partDetails.partNumber,
-			'content-length': partDetails.contentLength
+			'content-length': partDetails.contentLength,
+			'x-bz-content-sha1': partDetails.sha1
 		};
 
 		return await this._uploadFileOrPart(uploadDetails.uploadUrl, headers, part, onUploadProgress);
@@ -275,15 +276,17 @@ class B2 {
 				file.on('error', reject);
 			});
 		}
-		
-		if (!fileIsStream) {
-			let hash = Crypto.createHash('sha1');
-			hash.update(file);
-			headers['x-bz-content-sha1'] = hash.digest('hex');
-		} else {
-			// We are uploading a stream, which wil go through B2UploadStream, so we need to add 40 bytes for the sha1 trailer
-			headers['content-length'] += 40;
-			headers['x-bz-content-sha1'] = 'hex_digits_at_end';
+
+		if (!headers['x-bz-content-sha1']) {
+			if (!fileIsStream) {
+				let hash = Crypto.createHash('sha1');
+				hash.update(file);
+				headers['x-bz-content-sha1'] = hash.digest('hex');
+			} else {
+				// We are uploading a stream, which wil go through B2UploadStream, so we need to add 40 bytes for the sha1 trailer
+				headers['content-length'] += 40;
+				headers['x-bz-content-sha1'] = 'hex_digits_at_end';
+			}
 		}
 
 		let res = await this._req({
