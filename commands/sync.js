@@ -201,7 +201,7 @@ function listLocalFiles(directory, exclude, prefix, files) {
 	}
 }
 
-async function uploadLocalFile(bucketId, file, publicKey, why, prefix) {
+async function uploadLocalFile(bucketId, file, publicKey, why, prefix, retryCount = 0) {
 	if (file.stat.size > 100 * 1000 * 1000) {
 		// More than 100 MB
 		return await uploadLargeLocalFile(bucketId, file, publicKey, prefix);
@@ -267,9 +267,9 @@ async function uploadLocalFile(bucketId, file, publicKey, why, prefix) {
 
 		return response;
 	} catch (ex) {
-		if (ex.body && ex.body.code && ['bad_auth_token', 'expired_auth_token', 'service_unavailable'].includes(ex.body.code)) {
+		if (retryCount < 5 && ex.body && ex.body.code && ['bad_auth_token', 'expired_auth_token', 'service_unavailable'].includes(ex.body.code)) {
 			g_UploadDetails = null;
-			return await uploadLocalFile(bucketId, file, publicKey);
+			return await uploadLocalFile(bucketId, file, publicKey, why, prefix, retryCount + 1);
 		} else {
 			throw ex;
 		}
