@@ -1,23 +1,31 @@
 const Crypto = require('crypto');
 const HTTPS = require('https');
+const StdLib = require('@doctormckay/stdlib');
 const Stream = require('stream');
 const URL = require('url');
 const QueryString = require('querystring');
 
 const B2UploadStream = require('./uploadstream.js');
+const debugLog = require('../components/logging.js');
 
 const B2_API_PATH = '/b2api/v2';
 
 class B2 {
-	constructor(appKeyId, appKey) {
+	constructor(appKeyId, appKey, debug) {
 		this._appKeyId = appKeyId;
 		this._appKey = appKey;
-		
-		this._agent = new HTTPS.Agent({keepAlive: true});
-		
+		this._debug = debug;
+
+		if (debug) {
+			this._agent = new StdLib.HTTP.getProxyAgent(true, 'http://127.0.0.1:8888');
+		} else {
+			// keepAlive seems to be causing backblaze to respond with 501 sometimes
+			this._agent = new HTTPS.Agent({keepAlive: false});
+		}
+
 		this.authorization = null;
 	}
-	
+
 	/**
 	 * Authorize your account with B2. Once authorized, if your auth token expires the client will attempt
 	 * to automatically reauth.
@@ -32,7 +40,7 @@ class B2 {
 			},
 			body: {}
 		});
-		
+
 		['authorizationToken', 'apiUrl', 'downloadUrl'].forEach((field) => {
 			if (!res.body[field]) {
 				let err = new Error(`No ${field} in b2_authorize_account resposne`);
@@ -40,11 +48,13 @@ class B2 {
 				throw err;
 			}
 		});
-		
+
+		debugLog(`B2 authorized: ${JSON.stringify(res.body)}`);
+
 		this.authorization = res.body;
 		this.authorization.time = Date.now();
 	}
-	
+
 	/**
 	 * List all buckets, or get info about a specific bucket.
 	 * @param {{bucketId?: string, bucketName?: string, bucketTypes?: string[]}} [options]
@@ -59,10 +69,10 @@ class B2 {
 				...(options || {})
 			}
 		});
-		
+
 		return res.body;
 	}
-	
+
 	/**
 	 * Get parameters needed to upload a file. These parameters can be reused until an upload fails.
 	 * If an upload fails, you need to get new upload details and try again.
@@ -79,10 +89,10 @@ class B2 {
 				bucketId
 			}
 		});
-		
+
 		return res.body;
 	}
-	
+
 	/**
 	 * Upload a file.
 	 * @param {object} uploadDetails - Should be the full object returned by getUploadDetails
@@ -98,14 +108,14 @@ class B2 {
 			'content-type': fileDetails.contentType || 'b2/x-auto',
 			'content-length': fileDetails.contentLength
 		};
-		
+
 		for (let i in (fileDetails.b2Info || {})) {
 			headers['x-bz-info-' + i] = fileDetails.b2Info[i];
 		}
-		
+
 		return await this._uploadFileOrPart(uploadDetails.uploadUrl, headers, file, onUploadProgress);
 	}
-	
+
 	/**
 	 *
 	 * @param {string} bucketId
@@ -123,10 +133,10 @@ class B2 {
 				fileInfo: fileDetails.b2Info || {}
 			}
 		});
-		
+
 		return res.body;
 	}
-	
+
 	/**
 	 * Finalize a large file for which you have uploaded all parts.
 	 * @param {string} fileId
@@ -142,10 +152,10 @@ class B2 {
 				partSha1Array
 			}
 		});
-		
+
 		return res.body;
 	}
-	
+
 	/**
 	 * Get parameters needed to upload a large file part. These parameters can be reused until an upload fails.
 	 * If an upload fails, you need to get new upload details and try again.
@@ -162,10 +172,10 @@ class B2 {
 				fileId
 			}
 		});
-		
+
 		return res.body;
 	}
-	
+
 	/**
 	 *
 	 * @param {object} uploadDetails - Should be the full object returned from getPartUploadDetails
@@ -180,10 +190,10 @@ class B2 {
 			'x-bz-part-number': partDetails.partNumber,
 			'content-length': partDetails.contentLength
 		};
-		
+
 		return await this._uploadFileOrPart(uploadDetails.uploadUrl, headers, part, onUploadProgress);
 	}
-	
+
 	/**
 	 * Returns a list of unfinished large files in a bucket.
 	 * @param {string} bucketId
@@ -199,10 +209,10 @@ class B2 {
 				...(options || {}),
 			}
 		});
-		
+
 		return res.body;
 	}
-	
+
 	/**
 	 * Returns a list of all unfinished large files in a bucket.
 	 * @param {string} bucketId
@@ -214,7 +224,7 @@ class B2 {
 		opts.maxFileCount = 100;
 		return await this._listAll(this.listUnfinishedLargeFiles, bucketId, opts);
 	}
-	
+
 	/**
 	 * Cancel an unfinished large file upload.
 	 * @param {string} fileId
@@ -228,10 +238,10 @@ class B2 {
 				fileId
 			}
 		});
-		
+
 		return res.body;
 	}
-	
+
 	/**
 	 *
 	 * @param {string} url
@@ -243,24 +253,24 @@ class B2 {
 	 */
 	async _uploadFileOrPart(url, headers, file, onUploadProgress) {
 		let fileIsStream = typeof file.pipe == 'function';
-		
+
 		// For some reason B2 doesn't like having hex_digits_at_end for small files.
 		// If this file is small (<= 1 MB), go ahead and load it all into memory and just hash it now.
 		if (fileIsStream && headers['content-length'] <= 1000000) {
 			file = await new Promise((resolve, reject) => {
 				fileIsStream = false;
-				
+
 				let buf = Buffer.alloc(headers['content-length']);
 				let offset = 0;
 				file.on('data', (chunk) => {
 					if (!Buffer.isBuffer(chunk)) {
 						chunk = Buffer.from(chunk);
 					}
-					
+
 					chunk.copy(buf, offset);
 					offset += chunk.length;
 				});
-				
+
 				file.on('end', () => resolve(buf));
 				file.on('error', reject);
 			});
@@ -275,7 +285,7 @@ class B2 {
 			headers['content-length'] += 40;
 			headers['x-bz-content-sha1'] = 'hex_digits_at_end';
 		}
-		
+
 		let res = await this._req({
 			method: 'POST',
 			url,
@@ -283,10 +293,10 @@ class B2 {
 			onUploadProgress,
 			body: file
 		});
-		
+
 		return res.body;
 	}
-	
+
 	/**
 	 * List files in bucket by name.
 	 * @param {string} bucketId
@@ -302,10 +312,10 @@ class B2 {
 				...(options || {})
 			}
 		});
-		
+
 		return res.body;
 	}
-	
+
 	/**
 	 * List all files in bucket by name.
 	 * @param {string} bucketId
@@ -315,7 +325,7 @@ class B2 {
 	async listAllFileNames(bucketId, options) {
 		return await this._listAll(this.listFileNames, bucketId, options);
 	}
-	
+
 	/**
 	 * Hide a file.
 	 * @param {string} bucketId
@@ -331,15 +341,15 @@ class B2 {
 				fileName: filename
 			}
 		});
-		
+
 		return res.body;
 	}
-	
+
 	async _listAll(method, bucketId, options) {
 		let opts = Object.assign({maxFileCount: 10000}, options);
 		delete opts.startFileId;
 		delete opts.startFileName;
-		
+
 		let files = [];
 		let startKeyName;
 		do {
@@ -349,10 +359,10 @@ class B2 {
 			startKeyName = nextKeyName.replace('next', 'start');
 			opts[startKeyName] = res[nextKeyName];
 		} while (opts[startKeyName]);
-		
+
 		return {files};
 	}
-	
+
 	/**
 	 * Returns the response as a stream, or parsed JSON.
 	 * @param {{method?: string, url: string, headers?: object, qs?: object, onUploadProgress?: function, body?: string|object|Stream.Readable}} params
@@ -362,41 +372,42 @@ class B2 {
 	async _req(params) {
 		return new Promise((resolve, reject) => {
 			let headers = params.headers || {};
-			
+
 			// Encode JSON bodies
-			if (!headers['content-type'] && params.body && typeof params.body == 'object' && !Buffer.isBuffer(params.body)) {
+			if (!headers['content-type'] && params.body && typeof params.body == 'object' && !Buffer.isBuffer(params.body) && typeof params.body.pipe != 'function') {
 				headers['content-type'] = 'application/json';
 				params.body = JSON.stringify(params.body);
 			}
-			
+
 			// Add content-length if it's known
 			if (typeof params.body == 'string') {
 				headers['content-length'] = Buffer.byteLength(params.body);
 			}
-			
+
 			// Encode query string
 			if (params.qs && typeof params.qs == 'object') {
 				params.url += (params.url.includes('?') ? '&' : '?') + QueryString.stringify(params.qs);
 			}
-			
+
 			// Add auth header
 			if (this.authorization && this.authorization.authorizationToken && !headers.authorization) {
 				headers.authorization = this.authorization.authorizationToken;
 			}
-			
+
 			let url = URL.parse(params.url);
-			
+
 			headers['user-agent'] = 'node-b2ens/' + require('../package.json').version;
-			
+
 			// Percent encode Bz headers
 			for (let i in headers) {
 				if (i.startsWith('x-bz-')) {
 					headers[i] = encodeURIComponent(headers[i]);
 				}
 			}
-			
+
 			let req = HTTPS.request({
 				agent: this._agent,
+				rejectUnauthorized: !this._debug,
 				protocol: 'https:',
 				method: params.method || 'GET',
 				hostname: url.hostname,
@@ -414,7 +425,7 @@ class B2 {
 						} catch (ex) {
 							// invalid json I guess
 						}
-						
+
 						if (res.statusCode > 300) {
 							if (['bad_auth_token', 'expired_auth_token'].includes(data.code) && !url.path.match(/\/b2_upload_(file|part)/) && !params._authRetry) {
 								// Our auth token is expired, so get a new one
@@ -425,7 +436,7 @@ class B2 {
 									return reject(ex);
 								}
 							}
-							
+
 							let err = new Error(data.message || data.code || `HTTP error ${res.statusCode}`);
 							err.requestUrl = params.url;
 							err.status = res.statusCode;
@@ -433,7 +444,7 @@ class B2 {
 							err.body = data;
 							return reject(err);
 						}
-						
+
 						resolve({
 							status: res.statusCode,
 							headers: res.headers,
@@ -446,10 +457,10 @@ class B2 {
 						err.status = res.statusCode;
 						err.headers = res.headers;
 						err.stream = res;
-						
+
 						return reject(err);
 					}
-					
+
 					resolve({
 						status: res.statusCode,
 						headers: res.headers,
@@ -457,9 +468,9 @@ class B2 {
 					});
 				}
 			});
-			
+
 			req.on('error', reject);
-			
+
 			if (params.body && typeof params.body == 'object' && typeof params.body.pipe == 'function') {
 				let uploadStream = new B2UploadStream(params.onUploadProgress);
 				Stream.pipeline(
