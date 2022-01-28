@@ -55,6 +55,7 @@ let b2 = new B2(syncfile.accountId || syncfile.keyId, syncfile.applicationKey ||
 let startTime = Date.now();
 main().then(() => {
 	console.log(`Done in ${Date.now() - startTime} milliseconds`);
+	process.exit(0);
 }).catch(err => console.error(err));
 
 async function main() {
