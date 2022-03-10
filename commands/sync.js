@@ -8,9 +8,18 @@ const PassThroughProgressStream = require('../components/PassThroughProgressStre
 const debugLog = require('../components/logging.js');
 
 const LAST_MODIFIED_KEY = 'src_last_modified_millis';
-const MAX_CONCURRENT_UPLOADS = 5; // used only for large files at the moment
+const MAX_CONCURRENT_UPLOADS = 5;
 
 let g_UploadDetails;
+let g_ProgressDetails = {
+	bytesSent: 0,
+	filesSent: 0,
+	totalBytes: 0,
+	totalFiles: 0,
+	activeUploads: 0,
+	lastRollingByteCount: 0,
+	rollingByteCounts: []
+};
 
 let syncfile = process.argv[3];
 if (!syncfile) {
@@ -50,6 +59,10 @@ if (err) {
 	process.exit(4);
 }
 
+let g_Bucket;
+let g_PublicKey = null;
+let g_UploadQueue = new StdLib.DataStructures.AsyncQueue(processUpload, syncfile.uploadThreads || MAX_CONCURRENT_UPLOADS);
+
 let b2 = new B2(syncfile.accountId || syncfile.keyId, syncfile.applicationKey || syncfile.appKey, syncfile.debug);
 
 let startTime = Date.now();
@@ -59,10 +72,9 @@ main().then(() => {
 }).catch(err => console.error(err));
 
 async function main() {
-	let publicKey = null;
 	await new Promise((resolve) => {
 		if (syncfile.encryptionKey.publicKey) {
-			publicKey = syncfile.encryptionKey.publicKey;
+			g_PublicKey = syncfile.encryptionKey.publicKey;
 			resolve();
 		} else {
 			FS.readFile(syncfile.encryptionKey.publicKeyPath, (err, file) => {
@@ -71,13 +83,13 @@ async function main() {
 					process.exit(4);
 				}
 
-				publicKey = file.toString('ascii');
+				g_PublicKey = file.toString('ascii');
 				resolve();
 			});
 		}
 	});
 
-	if (!publicKey.includes('-----BEGIN PUBLIC KEY-----')) {
+	if (!g_PublicKey.includes('-----BEGIN PUBLIC KEY-----')) {
 		console.error('Malformed public key: should be in PEM format');
 		process.exit(4);
 	}
@@ -85,9 +97,8 @@ async function main() {
 	await b2.authorize();
 	console.log(`Authorized with B2 account ${b2.authorization.accountId}; using API URL ${b2.authorization.apiUrl}`);
 
-	let bucket;
 	try {
-		bucket = await b2.getBuckets({bucketName: syncfile.remote.bucket});
+		g_Bucket = await b2.getBuckets({bucketName: syncfile.remote.bucket});
 	} catch (ex) {
 		if (ex.body && ex.body.code) {
 			console.error(`Invalid bucket: ${ex.body.code}`);
@@ -97,17 +108,17 @@ async function main() {
 		process.exit(5);
 	}
 
-	if (!bucket || !bucket.buckets || !bucket.buckets[0]) {
+	if (!g_Bucket || !g_Bucket.buckets || !g_Bucket.buckets[0]) {
 		console.error('Cannot get bucket data: unknown error');
 		process.exit(5);
 	}
 
-	bucket = bucket.buckets[0];
+	g_Bucket = g_Bucket.buckets[0];
 	let prefixMsg = syncfile.remote.prefix ? ` prefix ${syncfile.remote.prefix}` : '';
-	console.log(`Syncing local directory ${syncfile.local.directory} with remote bucket ${bucket.bucketName} (${bucket.bucketId})${prefixMsg}`);
+	console.log(`Syncing local directory ${syncfile.local.directory} with remote bucket ${g_Bucket.bucketName} (${g_Bucket.bucketId})${prefixMsg}`);
 
 	console.log('Listing files in bucket...');
-	let {files} = await b2.listAllFileNames(bucket.bucketId, {prefix: syncfile.remote.prefix || ''});
+	let {files} = await b2.listAllFileNames(g_Bucket.bucketId, {prefix: syncfile.remote.prefix || ''});
 	let bucketFiles = {};
 	files.forEach((file) => {
 		if (syncfile.remote.prefix) {
@@ -122,16 +133,69 @@ async function main() {
 
 	try {
 		for (let i in localFiles) {
-			if (!bucketFiles[i]) {
-				// Missing in remote
-				await uploadLocalFile(bucket.bucketId, localFiles[i], publicKey, 'new', syncfile.remote.prefix || '');
-			} else {
-				if (!bucketFiles[i].fileInfo || !bucketFiles[i].fileInfo[LAST_MODIFIED_KEY]) {
-					console.log(`Warning: File ${i} is missing a modification time`);
-				} else if (bucketFiles[i].fileInfo[LAST_MODIFIED_KEY] != Math.floor(localFiles[i].stat.mtimeMs)) {
-					await uploadLocalFile(bucket.bucketId, localFiles[i], publicKey, 'modified', syncfile.remote.prefix || '');
-				}
+			if (
+				!bucketFiles[i] ||
+				(
+					bucketFiles[i].fileInfo &&
+					bucketFiles[i].fileInfo[LAST_MODIFIED_KEY]
+					&& bucketFiles[i].fileInfo[LAST_MODIFIED_KEY] != Math.floor(localFiles[i].stat.mtimeMs)
+				)
+			) {
+				// Missing or different in remote
+				g_ProgressDetails.totalFiles++;
+				g_ProgressDetails.totalBytes += localFiles[i].stat.size;
+
+				g_UploadQueue.push(localFiles[i]);
 			}
+		}
+
+		if (g_UploadQueue.length > 0) {
+			// Start up our progress display interval
+			let progressOutputInterval = null;
+			if (process.stdout.isTTY) {
+				let columns, rows;
+
+				let setupTtyWindow = () => {
+					[columns, rows] = process.stdout.getWindowSize();
+				};
+
+				setupTtyWindow();
+				process.stdout.on('resize', setupTtyWindow);
+
+				progressOutputInterval = setInterval(() => {
+					let now = Math.floor(Date.now() / 1000);
+					if (now > g_ProgressDetails.lastRollingByteCount) {
+						g_ProgressDetails.lastRollingByteCount = now;
+						g_ProgressDetails.rollingByteCounts.push(g_ProgressDetails.bytesSent);
+						if (g_ProgressDetails.rollingByteCounts.length > 10) {
+							g_ProgressDetails.rollingByteCounts = g_ProgressDetails.rollingByteCounts.slice(-10);
+						}
+					}
+
+					let averageSpeed = 0;
+					if (g_ProgressDetails.rollingByteCounts.length > 0) {
+						let first = g_ProgressDetails.rollingByteCounts[0];
+						let last = g_ProgressDetails.rollingByteCounts[g_ProgressDetails.rollingByteCounts.length - 1];
+						averageSpeed = (last - first) / g_ProgressDetails.rollingByteCounts.length;
+					}
+
+					process.stdout.cursorTo(0, rows - 1);
+					process.stdout.clearLine(0);
+
+					// TODO hide some of this stuff if our terminal is too small
+					let progressLine = `${g_ProgressDetails.activeUploads} cxns | ` +
+						`${g_ProgressDetails.filesSent}/${g_ProgressDetails.totalFiles} files | ` +
+						`${StdLib.Units.humanReadableBytes(g_ProgressDetails.bytesSent, false, true)}/${StdLib.Units.humanReadableBytes(g_ProgressDetails.totalBytes)} | ` +
+						`${StdLib.Units.humanReadableBytes(averageSpeed, false, true)}/s `;
+
+					let progressBar = StdLib.Rendering.progressBar(g_ProgressDetails.bytesSent, g_ProgressDetails.totalBytes, columns - progressLine.length, true);
+					process.stdout.write(progressLine + progressBar);
+				}, 500);
+			}
+
+			await new Promise((resolve) => g_UploadQueue.drain = resolve);
+
+			clearInterval(progressOutputInterval);
 		}
 
 		for (let i in bucketFiles) {
@@ -141,11 +205,186 @@ async function main() {
 			}
 		}
 
-		await cancelUnfinishedLargeFiles(bucket.bucketId, syncfile.remote.prefix || '');
+		await cancelUnfinishedLargeFiles(g_Bucket.bucketId, syncfile.remote.prefix || '');
 	} catch (ex) {
 		console.error('FATAL ERROR');
 		console.error(ex);
 		process.exit(1000);
+	}
+}
+
+async function processUpload(file, callback) {
+	try {
+		if (file.chunk) {
+			await processChunkUpload(file);
+		} else if (file.stat.size > 100 * 1000 * 1000) {
+			// File is more than 100 MB. Upload it as a large file
+			await processLargeUpload(file);
+		} else {
+			await processSmallUpload(file);
+		}
+	} catch (ex) {
+		return callback(ex);
+	}
+
+	callback();
+}
+
+async function processSmallUpload(file) {
+	await uploadLocalFile(g_Bucket.bucketId, file, g_PublicKey, syncfile.remote.prefix || '');
+}
+
+async function processLargeUpload(file) {
+	let chunkSize = Math.max(50 * 1000 * 1000, Math.ceil(file.stat.size / 10000)); // minimum 50 MB for each chunk
+	let readStream = FS.createReadStream(file.fullPath);
+	let encryptStream = Encryption.createEncryptStream(g_PublicKey, {highWaterMark: chunkSize * 2});
+	readStream.pipe(encryptStream);
+
+	let largeFileDetails = {
+		fileName: file.fileName,
+		chunkSize,
+		encryptStream,
+		readChunks: 0,
+		partHashes: new Array(Math.ceil(file.stat.size / chunkSize)),
+		availableUploadDetails: [],
+		ended: false
+	};
+
+	let response = await b2.startLargeFile(g_Bucket.bucketId, {
+		filename: syncfile.remote.prefix + file.fileName,
+		b2Info: {
+			[LAST_MODIFIED_KEY]: Math.floor(file.stat.mtimeMs).toString()
+		}
+	});
+
+	if (!response.fileId) {
+		throw new Error(`Did not get a file ID for uploading large file ${file.fileName}`);
+	}
+
+	largeFileDetails.fileId = response.fileId;
+
+	encryptStream.on('end', () => largeFileDetails.ended = true);
+
+	// Go ahead and insert the first chunk into the queue
+	await enqueueLargeFileChunk(largeFileDetails);
+}
+
+async function enqueueLargeFileChunk(largeFileDetails) {
+	if (largeFileDetails.ended) {
+		return;
+	}
+
+	let chunk = largeFileDetails.encryptStream.read(largeFileDetails.chunkSize);
+	if (chunk === null) {
+		// No data available yet, waiting on the disk
+		await StdLib.Promises.sleepAsync(500);
+		return await enqueueLargeFileChunk(largeFileDetails);
+	}
+
+	g_UploadQueue.insert({
+		largeFileDetails,
+		chunk,
+		chunkId: ++largeFileDetails.readChunks
+	});
+}
+
+async function processChunkUpload({largeFileDetails, chunk, chunkId}) {
+	// Since we just pulled a chunk from the queue, let's go ahead and insert a chunk into the queue, if we have one
+	enqueueLargeFileChunk(largeFileDetails);
+
+	let attempts = 0;
+	let err = null;
+	let dataStream;
+
+	do {
+		// Reset err or else we will think we had an error even if this succeeds
+		err = null;
+		let observedProcessedBytes = 0;
+
+		try {
+			let uploadDetails;
+			if (largeFileDetails.availableUploadDetails.length == 0) {
+				uploadDetails = await b2.getLargeFilePartUploadDetails(largeFileDetails.fileId);
+				//debugLog(`Thread ${threadId} got large file part upload details`);
+			} else {
+				uploadDetails = largeFileDetails.availableUploadDetails.splice(0, 1)[0];
+			}
+
+			let host = (new URL(uploadDetails.uploadUrl)).host;
+			//debugLog(`Thread ${threadId} starting chunk ${chunkId} on attempt ${attempts + 1} (${host})`);
+
+			dataStream = new PassThroughProgressStream(chunk);
+
+			let hash = Crypto.createHash('sha1');
+			hash.update(chunk);
+			hash = hash.digest('hex');
+
+			let uploadStartTime = Date.now();
+
+			g_ProgressDetails.activeUploads++;
+
+			let uploadResult = await b2.uploadLargeFilePart(uploadDetails, {
+				partNumber: chunkId,
+				contentLength: chunk.length,
+				sha1: hash
+			}, dataStream, (progress) => {
+				g_ProgressDetails.bytesSent += progress.processedBytes - observedProcessedBytes;
+				observedProcessedBytes = progress.processedBytes;
+			});
+
+			// part upload succeeded
+			largeFileDetails.availableUploadDetails.push(uploadDetails);
+			//let bytesPerSecond = Math.round(data.length / ((Date.now() - uploadStartTime) / 1000));
+			g_ProgressDetails.activeUploads--;
+			//debugLog(`Thread ${threadId} finished uploading chunk ${chunkId} successfully on attempt ${attempts + 1}. Average speed to ${host} is ${StdLib.Units.humanReadableBytes(bytesPerSecond)}/s`);
+
+			largeFileDetails.partHashes[chunkId - 1] = uploadResult.contentSha1;
+
+			// Is the file finished?
+			let fileIsFinished = true;
+			for (let i = 0; i < largeFileDetails.partHashes.length; i++) {
+				if (typeof largeFileDetails.partHashes[i] != 'string') {
+					fileIsFinished = false;
+					break;
+				}
+			}
+
+			if (fileIsFinished) {
+				await b2.finishLargeFile(largeFileDetails.fileId, largeFileDetails.partHashes);
+				g_ProgressDetails.filesSent++;
+			}
+
+			break;
+		} catch (ex) {
+			console.log(ex);
+			console.log('');
+			g_ProgressDetails.activeUploads--;
+
+			dataStream.destroy();
+			let exCode = ex.body && ex.body.code;
+			if (
+				ex.code == 'ECONNRESET' ||
+				(exCode && ['internal_error', 'bad_auth_token', 'expired_auth_token', 'service_unavailable'].includes(exCode))
+			) {
+				// we'll get a new upload url and try again
+			} else {
+				err = ex;
+			}
+
+			// Remove this chunk from bytesUploaded
+			g_ProgressDetails.bytesSent -= observedProcessedBytes;
+
+			//debugLog(`Thread ${threadId} got an error uploading large file chunk ${chunkId}: ${ex.message}`);
+			//console.error(`\nError uploading large file: ${ex.message}`);
+			await StdLib.Promises.sleepAsync(5000); // wait 5 seconds
+		}
+	} while (++attempts <= 10);
+
+	if (err) {
+		// Fatal error
+		let ex = new Error(`Fatal error uploading large file ${file.fileName}: ${err.message}`);
+		ex.inner = err;
+		throw ex;
 	}
 }
 
@@ -210,19 +449,18 @@ function listLocalFiles(directory, exclude, prefix, files) {
 	}
 }
 
-async function uploadLocalFile(bucketId, file, publicKey, why, prefix, retryCount = 0) {
-	if (file.stat.size > 100 * 1000 * 1000) {
-		// More than 100 MB
-		return await uploadLargeLocalFile(bucketId, file, publicKey, prefix);
-	}
-
+async function uploadLocalFile(bucketId, file, publicKey, prefix, retryCount = 0) {
 	let eol = process.stdout.isTTY ? '' : '\n';
-	process.stdout.write(`Uploading ${why} file ${file.fileName}... ${eol}`);
+	//process.stdout.write(`Uploading ${why} file ${file.fileName}... ${eol}`);
+
+	let observedProcessedBytes = 0;
 
 	try {
 		let read = FS.createReadStream(file.fullPath);
 		let encrypt = Encryption.createEncryptStream(publicKey);
 		read.pipe(encrypt);
+
+		g_ProgressDetails.activeUploads++;
 
 		let uploadDetails = await getUploadDetails(bucketId);
 		let uploadStartTime = Date.now();
@@ -233,10 +471,12 @@ async function uploadLocalFile(bucketId, file, publicKey, why, prefix, retryCoun
 				[LAST_MODIFIED_KEY]: Math.floor(file.stat.mtimeMs)
 			}
 		}, encrypt, (progress) => {
+			g_ProgressDetails.bytesSent += progress.processedBytes - observedProcessedBytes;
+			observedProcessedBytes = progress.processedBytes;
 			if (process.stdout.isTTY) {
 				let pct = Math.floor((progress.processedBytes / file.stat.size) * 100);
-				process.stdout.clearLine(0);
-				process.stdout.write(`\rUploading ${why} file ${file.fileName}... ${pct}% (${StdLib.Units.humanReadableBytes(progress.processedBytes, false, true)}) `);
+				//process.stdout.clearLine(0);
+				//process.stdout.write(`\rUploading ${why} file ${file.fileName}... ${pct}% (${StdLib.Units.humanReadableBytes(progress.processedBytes, false, true)}) `);
 			}
 		});
 
@@ -244,13 +484,18 @@ async function uploadLocalFile(bucketId, file, publicKey, why, prefix, retryCoun
 		let fileSize = StdLib.Units.humanReadableBytes(file.stat.size);
 		debugLog(`Uploaded ${file.fileName} (${fileSize}) successfully. Average speed to ${host} was ${StdLib.Units.humanReadableBytes(file.stat.size / ((Date.now() - uploadStartTime) / 1000))}/s`);
 
-		console.log(`complete`);
+		g_ProgressDetails.activeUploads--;
+		g_ProgressDetails.filesSent++;
+		//console.log(`complete`);
 
 		return response;
 	} catch (ex) {
+		g_ProgressDetails.activeUploads--;
+		g_ProgressDetails.bytesSent -= observedProcessedBytes;
+
 		if (retryCount < 5) {
 			g_UploadDetails = null;
-			return await uploadLocalFile(bucketId, file, publicKey, why, prefix, retryCount + 1);
+			return await uploadLocalFile(bucketId, file, publicKey, prefix, retryCount + 1);
 		} else {
 			throw ex;
 		}
@@ -259,7 +504,7 @@ async function uploadLocalFile(bucketId, file, publicKey, why, prefix, retryCoun
 
 async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries = 0) {
 	let eol = process.stdout.isTTY ? '' : '\n';
-	process.stdout.write(`Uploading large file ${file.fileName}... preparing ${eol}`);
+	//process.stdout.write(`Uploading large file ${file.fileName}... preparing ${eol}`);
 
 	let chunkSize = Math.max(50 * 1000 * 1000, Math.ceil(file.stat.size / 10000)); // minimum 50 MB for each chunk
 	let readStream = FS.createReadStream(file.fullPath);
@@ -278,10 +523,10 @@ async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries =
 		});
 	} catch (ex) {
 		if (process.stdout.isTTY) {
-			process.stdout.clearLine(0);
-			process.stdout.write('\r');
+			//process.stdout.clearLine(0);
+			//process.stdout.write('\r');
 		}
-		process.stdout.write(`Uploading large file ${file.fileName}... ${ex.message} \n`);
+		//process.stdout.write(`Uploading large file ${file.fileName}... ${ex.message} \n`);
 
 		if (retries >= 5) {
 			console.log(`Large file ${file.fileName} failed fatally`);
@@ -307,15 +552,15 @@ async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries =
 	encrypt.on('end', () => ended = true);
 
 	if (process.stdout.isTTY) {
-		process.stdout.clearLine(0);
-		process.stdout.write(`\rUploading large file ${file.fileName}... 0% ${eol}`);
+		//process.stdout.clearLine(0);
+		//process.stdout.write(`\rUploading large file ${file.fileName}... 0% ${eol}`);
 	}
 
 	let printUploadStatus = () => {
 		if (process.stdout.isTTY) {
 			let pct = Math.floor((bytesUploaded / file.stat.size) * 100);
-			process.stdout.clearLine(0);
-			process.stdout.write(`\rUploading large file ${file.fileName}... ${pct}% (${StdLib.Units.humanReadableBytes(bytesUploaded)}) `);
+			//process.stdout.clearLine(0);
+			//process.stdout.write(`\rUploading large file ${file.fileName}... ${pct}% (${StdLib.Units.humanReadableBytes(bytesUploaded)}) `);
 		}
 	};
 
@@ -361,19 +606,22 @@ async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries =
 						hash = hash.digest('hex');
 
 						let uploadStartTime = Date.now();
-						let observedProcessedBytes = 0;
+
+						g_ProgressDetails.activeUploads++;
 
 						let uploadResult = await b2.uploadLargeFilePart(uploadDetails, {
 							partNumber: chunkId + 1,
 							contentLength: data.length,
 							sha1: hash
 						}, dataStream, (progress) => {
+							g_ProgressDetails.bytesSent += progress.processedBytes - threadStatuses[threadId].bytes;
 							bytesUploaded += progress.processedBytes - threadStatuses[threadId].bytes;
 							threadStatuses[threadId].bytes = progress.processedBytes;
 						});
 
 						// part upload succeeded
 						let bytesPerSecond = Math.round(data.length / ((Date.now() - uploadStartTime) / 1000));
+						g_ProgressDetails.activeUploads--;
 						debugLog(`Thread ${threadId} finished uploading chunk ${chunkId} successfully on attempt ${attempts + 1}. Average speed to ${host} is ${StdLib.Units.humanReadableBytes(bytesPerSecond)}/s`);
 
 						bytesUploaded += data.length - threadStatuses[threadId].bytes;
@@ -381,6 +629,8 @@ async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries =
 						partHashes[chunkId] = uploadResult.contentSha1;
 						break;
 					} catch (ex) {
+						g_ProgressDetails.activeUploads--;
+
 						dataStream.destroy();
 						let exCode = ex.body && ex.body.code;
 						if (
@@ -394,6 +644,7 @@ async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries =
 						}
 
 						// Remove this chunk from bytesUploaded
+						g_ProgressDetails.bytesSent -= threadStatuses[threadId].bytes;
 						bytesUploaded -= threadStatuses[threadId].bytes;
 						threadStatuses[threadId] = null;
 
@@ -444,20 +695,21 @@ async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries =
 	clearInterval(uploadStatusInterval);
 	clearInterval(threadStatusLoggingInterval);
 
+	g_ProgressDetails.filesSent++;
 	debugLog(`Large file ${file.fileName} uploaded all parts successfully`);
 
 	if (process.stdout.isTTY) {
-		process.stdout.clearLine(0);
-		process.stdout.write("\r");
-		process.stdout.write(`Uploading large file ${file.fileName}... finalizing `);
+		//process.stdout.clearLine(0);
+		//process.stdout.write("\r");
+		//process.stdout.write(`Uploading large file ${file.fileName}... finalizing `);
 	}
 
 	try {
 		await b2.finishLargeFile(fileId, partHashes);
 	} catch (ex) {
 		if (process.stdout.isTTY) {
-			process.stdout.clearLine(0);
-			process.stdout.write("\r");
+			//process.stdout.clearLine(0);
+			//process.stdout.write("\r");
 		}
 
 		console.log(`Uploading large file ${file.fileName}... ERROR: ${ex.message}`);
@@ -471,8 +723,8 @@ async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries =
 	}
 
 	if (process.stdout.isTTY) {
-		process.stdout.clearLine(0);
-		process.stdout.write("\r");
+		//process.stdout.clearLine(0);
+		//process.stdout.write("\r");
 	}
 
 	console.log(`Uploading large file ${file.fileName}... complete`);
