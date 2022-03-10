@@ -120,27 +120,33 @@ async function main() {
 	console.log('Examining local directory...');
 	let localFiles = listLocalFiles(syncfile.local.directory, syncfile.local.exclude || []);
 
-	for (let i in localFiles) {
-		if (!bucketFiles[i]) {
-			// Missing in remote
-			await uploadLocalFile(bucket.bucketId, localFiles[i], publicKey, 'new', syncfile.remote.prefix || '');
-		} else {
-			if (!bucketFiles[i].fileInfo || !bucketFiles[i].fileInfo[LAST_MODIFIED_KEY]) {
-				console.log(`Warning: File ${i} is missing a modification time`);
-			} else if (bucketFiles[i].fileInfo[LAST_MODIFIED_KEY] != Math.floor(localFiles[i].stat.mtimeMs)) {
-				await uploadLocalFile(bucket.bucketId, localFiles[i], publicKey, 'modified', syncfile.remote.prefix || '');
+	try {
+		for (let i in localFiles) {
+			if (!bucketFiles[i]) {
+				// Missing in remote
+				await uploadLocalFile(bucket.bucketId, localFiles[i], publicKey, 'new', syncfile.remote.prefix || '');
+			} else {
+				if (!bucketFiles[i].fileInfo || !bucketFiles[i].fileInfo[LAST_MODIFIED_KEY]) {
+					console.log(`Warning: File ${i} is missing a modification time`);
+				} else if (bucketFiles[i].fileInfo[LAST_MODIFIED_KEY] != Math.floor(localFiles[i].stat.mtimeMs)) {
+					await uploadLocalFile(bucket.bucketId, localFiles[i], publicKey, 'modified', syncfile.remote.prefix || '');
+				}
 			}
 		}
-	}
 
-	for (let i in bucketFiles) {
-		if (!localFiles[i]) {
-			// Missing locally
-			await hideRemoteFile(bucketFiles[i], syncfile.remote.prefix || '');
+		for (let i in bucketFiles) {
+			if (!localFiles[i]) {
+				// Missing locally
+				await hideRemoteFile(bucketFiles[i], syncfile.remote.prefix || '');
+			}
 		}
-	}
 
-	await cancelUnfinishedLargeFiles(bucket.bucketId, syncfile.remote.prefix || '');
+		await cancelUnfinishedLargeFiles(bucket.bucketId, syncfile.remote.prefix || '');
+	} catch (ex) {
+		console.error('FATAL ERROR');
+		console.error(ex);
+		process.exit(1000);
+	}
 }
 
 /**
