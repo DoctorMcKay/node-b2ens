@@ -406,11 +406,12 @@ async function processChunkUpload({largeFileDetails, chunk, chunkId}) {
 
 	let attempts = 0;
 	let err = null;
-	let dataStream = null;
+	let dataStream;
 
 	do {
 		// Reset err or else we will think we had an error even if this succeeds
 		err = null;
+		dataStream = null;
 		let observedProcessedBytes = 0;
 
 		try {
@@ -471,7 +472,9 @@ async function processChunkUpload({largeFileDetails, chunk, chunkId}) {
 			log(ex);
 			g_ProgressDetails.activeUploads--;
 
+			// noinspection PointlessBooleanExpressionJS
 			if (dataStream) {
+				// noinspection JSObjectNullOrUndefined
 				dataStream.destroy();
 			}
 
@@ -519,6 +522,7 @@ function listLocalFiles(directory, exclude, prefix, files) {
 			listLocalFiles(filename, exclude, relativeFilename, files);
 		} else {
 			// Is this file excluded?
+			// noinspection RedundantIfStatementJS
 			let isExcluded = exclude.some((exclusion) => {
 				let normalizedFilename = normalize(filename);
 				let normalizedExclusion = normalize(exclusion);
@@ -541,6 +545,7 @@ function listLocalFiles(directory, exclude, prefix, files) {
 					return true;
 				}
 
+				// noinspection RedundantIfStatementJS
 				if (normalizedFilename.startsWith(normalizedExclusion + '/')) {
 					return true;
 				}
