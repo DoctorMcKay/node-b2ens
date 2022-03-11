@@ -447,7 +447,7 @@ async function processChunkUpload({largeFileDetails, chunk, chunkId}) {
 			// part upload succeeded
 			largeFileDetails.availableUploadDetails.push(uploadDetails);
 			g_ProgressDetails.activeUploads--;
-			let bytesPerSecond = Math.round(data.length / ((Date.now() - uploadStartTime) / 1000));
+			let bytesPerSecond = Math.round(chunk.length / ((Date.now() - uploadStartTime) / 1000));
 			debugLog(`Finished uploading chunk ${chunkId} successfully on attempt ${attempts + 1}. Average speed to ${host} is ${StdLib.Units.humanReadableBytes(bytesPerSecond)}/s`);
 
 			largeFileDetails.partHashes[chunkId - 1] = uploadResult.contentSha1;
@@ -497,7 +497,7 @@ async function processChunkUpload({largeFileDetails, chunk, chunkId}) {
 
 	if (err) {
 		// Fatal error
-		let ex = new Error(`Fatal error uploading large file ${file.fileName}: ${err.message}`);
+		let ex = new Error(`Fatal error uploading large file ${largeFileDetails.fileName}: ${err.message}`);
 		ex.inner = err;
 		throw ex;
 	}
