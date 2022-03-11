@@ -406,7 +406,7 @@ async function processChunkUpload({largeFileDetails, chunk, chunkId}) {
 
 	let attempts = 0;
 	let err = null;
-	let dataStream;
+	let dataStream = null;
 
 	do {
 		// Reset err or else we will think we had an error even if this succeeds
@@ -417,13 +417,12 @@ async function processChunkUpload({largeFileDetails, chunk, chunkId}) {
 			let uploadDetails;
 			if (largeFileDetails.availableUploadDetails.length == 0) {
 				uploadDetails = await b2.getLargeFilePartUploadDetails(largeFileDetails.fileId);
-				//debugLog(`Thread ${threadId} got large file part upload details`);
 			} else {
 				uploadDetails = largeFileDetails.availableUploadDetails.splice(0, 1)[0];
 			}
 
 			let host = (new URL(uploadDetails.uploadUrl)).host;
-			//debugLog(`Thread ${threadId} starting chunk ${chunkId} on attempt ${attempts + 1} (${host})`);
+			debugLog(`Starting chunk ${chunkId} on attempt ${attempts + 1} (${host})`);
 
 			dataStream = new PassThroughProgressStream(chunk);
 
@@ -446,9 +445,9 @@ async function processChunkUpload({largeFileDetails, chunk, chunkId}) {
 
 			// part upload succeeded
 			largeFileDetails.availableUploadDetails.push(uploadDetails);
-			//let bytesPerSecond = Math.round(data.length / ((Date.now() - uploadStartTime) / 1000));
 			g_ProgressDetails.activeUploads--;
-			//debugLog(`Thread ${threadId} finished uploading chunk ${chunkId} successfully on attempt ${attempts + 1}. Average speed to ${host} is ${StdLib.Units.humanReadableBytes(bytesPerSecond)}/s`);
+			let bytesPerSecond = Math.round(data.length / ((Date.now() - uploadStartTime) / 1000));
+			debugLog(`Finished uploading chunk ${chunkId} successfully on attempt ${attempts + 1}. Average speed to ${host} is ${StdLib.Units.humanReadableBytes(bytesPerSecond)}/s`);
 
 			largeFileDetails.partHashes[chunkId - 1] = uploadResult.contentSha1;
 
@@ -472,7 +471,10 @@ async function processChunkUpload({largeFileDetails, chunk, chunkId}) {
 			log(ex);
 			g_ProgressDetails.activeUploads--;
 
-			dataStream.destroy();
+			if (dataStream) {
+				dataStream.destroy();
+			}
+
 			let exCode = ex.body && ex.body.code;
 			if (
 				ex.code == 'ECONNRESET' ||
