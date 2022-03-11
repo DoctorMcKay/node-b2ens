@@ -20,6 +20,123 @@ let g_ProgressDetails = {
 	lastRollingByteCount: 0,
 	rollingByteCounts: []
 };
+let g_ConsoleLogLines = [];
+let g_ConsoleInDynamicMode = false;
+
+function log(msg) {
+	let output = StdLib.Time.timestampString() + ' - ' + msg;
+
+	if (!process.stdout.isTTY) {
+		console.log(output);
+	} else {
+		g_ConsoleLogLines.push(StdLib.Time.timestampString() + ' - ' + msg);
+
+		if (g_ConsoleLogLines.length > 400) {
+			g_ConsoleLogLines = g_ConsoleLogLines.slice(-400);
+		}
+
+		if (!g_ConsoleInDynamicMode) {
+			console.log(output);
+		} else {
+			// The console is in dynamic mode
+			flushLogLines();
+		}
+	}
+}
+
+function flushLogLines() {
+	process.stdout.cursorTo(0, 0);
+	process.stdout.clearScreenDown();
+	getLogLinesForFlush().forEach(line => process.stdout.write(line + '\n'));
+	printProgressLine();
+}
+
+function getLogLinesForFlush() {
+	let availableRows = process.stdout.rows - 1;
+	let lines = [];
+	for (let i = g_ConsoleLogLines.length - 1; i >= 0 && lines.length < availableRows; i--) {
+		let line = g_ConsoleLogLines[i];
+		let lineChunks = [];
+		for (let j = 0; j < line.length; j += process.stdout.columns) {
+			lineChunks.push(line.substring(j, j + process.stdout.columns));
+		}
+
+		// We've now chunkified this line into however many overflow lines it takes. Push them onto our lines array backwards
+		lineChunks.reverse();
+		lines = lines.concat(lineChunks);
+	}
+
+	lines.reverse();
+	return lines;
+}
+
+function printProgressLine() {
+	let now = Math.floor(Date.now() / 1000);
+	if (now > g_ProgressDetails.lastRollingByteCount) {
+		g_ProgressDetails.lastRollingByteCount = now;
+		g_ProgressDetails.rollingByteCounts.push(g_ProgressDetails.bytesSent);
+		if (g_ProgressDetails.rollingByteCounts.length > 10) {
+			g_ProgressDetails.rollingByteCounts = g_ProgressDetails.rollingByteCounts.slice(-10);
+		}
+	}
+
+	let averageSpeed = 0;
+	if (g_ProgressDetails.rollingByteCounts.length > 0) {
+		let first = g_ProgressDetails.rollingByteCounts[0];
+		let last = g_ProgressDetails.rollingByteCounts[g_ProgressDetails.rollingByteCounts.length - 1];
+		averageSpeed = (last - first) / g_ProgressDetails.rollingByteCounts.length;
+	}
+
+	process.stdout.cursorTo(0, process.stdout.rows - 1);
+	process.stdout.clearLine(0);
+
+	let etaSeconds = Math.max(0, Math.round((g_ProgressDetails.totalBytes - g_ProgressDetails.bytesSent) / averageSpeed));
+	let etaHours = Math.floor(etaSeconds / (60 * 60));
+	etaSeconds -= etaHours * 60 * 60;
+	let etaMinutes = Math.floor(etaSeconds / 60);
+	etaSeconds -= etaMinutes * 60;
+
+	let infoTags = [
+		`${g_ProgressDetails.activeUploads} cxns`,
+		`${g_ProgressDetails.filesSent}/${g_ProgressDetails.totalFiles} files`,
+		`${StdLib.Units.humanReadableBytes(g_ProgressDetails.bytesSent, false, true)}/${StdLib.Units.humanReadableBytes(g_ProgressDetails.totalBytes)}`,
+		`${StdLib.Units.humanReadableBytes(averageSpeed, false, true)}/s`,
+		isNaN(etaSeconds) ? 'ETA -:--' : `ETA ${etaHours > 0 ? `${etaHours}:` : ''}${etaMinutes}:${etaSeconds.toString().padStart(2, '0')}`
+	];
+
+	let infoTagPriority = [
+		2, // bytes
+		3, // speed
+		4, // ETA
+		0, // connections
+		1  // files
+	];
+
+	let filteredInfoTags = new Array(infoTags.length);
+	for (let i = 0; i < infoTagPriority.length; i++) {
+		let tag = infoTags[infoTagPriority[i]];
+
+		// reserve 15 columns for the progress bar and 1 column on each side of the progress bar
+
+		if (filteredInfoTags.filter(v => v).join(' | ').length + tag.length + 3 >= process.stdout.columns - 17) {
+			break;
+		}
+
+		filteredInfoTags[infoTagPriority[i]] = tag;
+	}
+
+	let progressLine = filteredInfoTags.filter(v => v).join(' | ');
+	let progressBar = StdLib.Rendering.progressBar(
+		// prevent 101%, since bytesSent can be more than totalBytes due to encryption overhead
+		Math.min(g_ProgressDetails.bytesSent, g_ProgressDetails.totalBytes),
+		g_ProgressDetails.totalBytes,
+		process.stdout.columns - progressLine.length - 2,
+		true
+	);
+	progressLine += ' ' + progressBar + ' ';
+
+	process.stdout.write(progressLine);
+}
 
 let syncfile = process.argv[3];
 if (!syncfile) {
@@ -35,7 +152,7 @@ try {
 		console.error('Invalid path to syncfile.');
 		process.exit(3);
 	} else {
-		console.log('Syncfile is corrupt.');
+		console.error('Syncfile is corrupt.');
 		process.exit(4);
 	}
 }
@@ -67,7 +184,14 @@ let b2 = new B2(syncfile.accountId || syncfile.keyId, syncfile.applicationKey ||
 
 let startTime = Date.now();
 main().then(() => {
-	console.log(`Done in ${Date.now() - startTime} milliseconds`);
+	let timeMs = Date.now() - startTime;
+	let timeHours = Math.floor(timeMs / (1000 * 60 * 60));
+	timeMs -= timeHours * (1000 * 60 * 60);
+	let timeMinutes = Math.floor(timeMs / (1000 * 60));
+	timeMs -= timeMinutes * (1000 * 60);
+	let timeSeconds = Math.floor(timeMs / 1000);
+
+	log(`Done in ${timeHours.toString().padStart(2, '0')}:${timeMinutes.toString().padStart(2, '0')}:${timeSeconds.toString().padStart(2, '0')}`);
 	process.exit(0);
 }).catch(err => console.error(err));
 
@@ -95,7 +219,7 @@ async function main() {
 	}
 
 	await b2.authorize();
-	console.log(`Authorized with B2 account ${b2.authorization.accountId}; using API URL ${b2.authorization.apiUrl}`);
+	log(`Authorized with B2 account ${b2.authorization.accountId}; using API URL ${b2.authorization.apiUrl}`);
 
 	try {
 		g_Bucket = await b2.getBuckets({bucketName: syncfile.remote.bucket});
@@ -115,9 +239,9 @@ async function main() {
 
 	g_Bucket = g_Bucket.buckets[0];
 	let prefixMsg = syncfile.remote.prefix ? ` prefix ${syncfile.remote.prefix}` : '';
-	console.log(`Syncing local directory ${syncfile.local.directory} with remote bucket ${g_Bucket.bucketName} (${g_Bucket.bucketId})${prefixMsg}`);
+	log(`Syncing local directory ${syncfile.local.directory} with remote bucket ${g_Bucket.bucketName} (${g_Bucket.bucketId})${prefixMsg}`);
 
-	console.log('Listing files in bucket...');
+	log('Listing files in bucket...');
 	let {files} = await b2.listAllFileNames(g_Bucket.bucketId, {prefix: syncfile.remote.prefix || ''});
 	let bucketFiles = {};
 	files.forEach((file) => {
@@ -128,7 +252,7 @@ async function main() {
 		bucketFiles[file.fileName] = file;
 	});
 
-	console.log('Examining local directory...');
+	log('Examining local directory...');
 	let localFiles = listLocalFiles(syncfile.local.directory, syncfile.local.exclude || []);
 
 	try {
@@ -149,60 +273,47 @@ async function main() {
 			}
 		}
 
-		if (g_UploadQueue.length > 0) {
+		if (g_UploadQueue.length == 0) {
+			log('Nothing to upload');
+		} else {
+			log('Starting uploads');
+
 			// Start up our progress display interval
 			let progressOutputInterval = null;
 			if (process.stdout.isTTY) {
-				let columns, rows;
-
-				let setupTtyWindow = () => {
-					[columns, rows] = process.stdout.getWindowSize();
-				};
-
-				setupTtyWindow();
-				process.stdout.on('resize', setupTtyWindow);
-
-				progressOutputInterval = setInterval(() => {
-					let now = Math.floor(Date.now() / 1000);
-					if (now > g_ProgressDetails.lastRollingByteCount) {
-						g_ProgressDetails.lastRollingByteCount = now;
-						g_ProgressDetails.rollingByteCounts.push(g_ProgressDetails.bytesSent);
-						if (g_ProgressDetails.rollingByteCounts.length > 10) {
-							g_ProgressDetails.rollingByteCounts = g_ProgressDetails.rollingByteCounts.slice(-10);
-						}
-					}
-
-					let averageSpeed = 0;
-					if (g_ProgressDetails.rollingByteCounts.length > 0) {
-						let first = g_ProgressDetails.rollingByteCounts[0];
-						let last = g_ProgressDetails.rollingByteCounts[g_ProgressDetails.rollingByteCounts.length - 1];
-						averageSpeed = (last - first) / g_ProgressDetails.rollingByteCounts.length;
-					}
-
-					process.stdout.cursorTo(0, rows - 1);
-					process.stdout.clearLine(0);
-
-					// TODO hide some of this stuff if our terminal is too small
-					let progressLine = `${g_ProgressDetails.activeUploads} cxns | ` +
-						`${g_ProgressDetails.filesSent}/${g_ProgressDetails.totalFiles} files | ` +
-						`${StdLib.Units.humanReadableBytes(g_ProgressDetails.bytesSent, false, true)}/${StdLib.Units.humanReadableBytes(g_ProgressDetails.totalBytes)} | ` +
-						`${StdLib.Units.humanReadableBytes(averageSpeed, false, true)}/s `;
-
-					let progressBar = StdLib.Rendering.progressBar(g_ProgressDetails.bytesSent, g_ProgressDetails.totalBytes, columns - progressLine.length, true);
-					process.stdout.write(progressLine + progressBar);
-				}, 500);
+				flushLogLines();
+				process.stdout.on('resize', flushLogLines);
+				progressOutputInterval = setInterval(printProgressLine, 500);
+				g_ConsoleInDynamicMode = true;
 			}
 
 			await new Promise((resolve) => g_UploadQueue.drain = resolve);
 
 			clearInterval(progressOutputInterval);
+			g_ConsoleInDynamicMode = false;
+			process.stdout.removeListener('resize', flushLogLines);
+
+			// Clear the progress line
+			process.stdout.cursorTo(0, process.stdout.rows - 1);
+			process.stdout.clearLine(0);
+
+			// Figure out where we need to move the cursor to
+			process.stdout.cursorTo(0, getLogLinesForFlush().length);
 		}
+
+		let hideQueue = new StdLib.DataStructures.AsyncQueue(({file, prefix}, callback) => {
+			hideRemoteFile(file, prefix).then(() => callback()).catch(callback);
+		}, 10);
 
 		for (let i in bucketFiles) {
 			if (!localFiles[i]) {
 				// Missing locally
-				await hideRemoteFile(bucketFiles[i], syncfile.remote.prefix || '');
+				hideQueue.push({file: bucketFiles[i], prefix: syncfile.remote.prefix || ''});
 			}
+		}
+
+		if (hideQueue.length > 0) {
+			await new Promise((resolve) => hideQueue.drain = resolve);
 		}
 
 		await cancelUnfinishedLargeFiles(g_Bucket.bucketId, syncfile.remote.prefix || '');
@@ -232,6 +343,7 @@ async function processUpload(file, callback) {
 
 async function processSmallUpload(file) {
 	await uploadLocalFile(g_Bucket.bucketId, file, g_PublicKey, syncfile.remote.prefix || '');
+	log(`Upload ${file.fileName}`);
 }
 
 async function processLargeUpload(file) {
@@ -352,12 +464,12 @@ async function processChunkUpload({largeFileDetails, chunk, chunkId}) {
 			if (fileIsFinished) {
 				await b2.finishLargeFile(largeFileDetails.fileId, largeFileDetails.partHashes);
 				g_ProgressDetails.filesSent++;
+				log(`Upload ${largeFileDetails.fileName}`);
 			}
 
 			break;
 		} catch (ex) {
-			console.log(ex);
-			console.log('');
+			log(ex);
 			g_ProgressDetails.activeUploads--;
 
 			dataStream.destroy();
@@ -374,8 +486,6 @@ async function processChunkUpload({largeFileDetails, chunk, chunkId}) {
 			// Remove this chunk from bytesUploaded
 			g_ProgressDetails.bytesSent -= observedProcessedBytes;
 
-			//debugLog(`Thread ${threadId} got an error uploading large file chunk ${chunkId}: ${ex.message}`);
-			//console.error(`\nError uploading large file: ${ex.message}`);
 			await StdLib.Promises.sleepAsync(5000); // wait 5 seconds
 		}
 	} while (++attempts <= 10);
@@ -450,9 +560,6 @@ function listLocalFiles(directory, exclude, prefix, files) {
 }
 
 async function uploadLocalFile(bucketId, file, publicKey, prefix, retryCount = 0) {
-	let eol = process.stdout.isTTY ? '' : '\n';
-	//process.stdout.write(`Uploading ${why} file ${file.fileName}... ${eol}`);
-
 	let observedProcessedBytes = 0;
 
 	try {
@@ -473,11 +580,6 @@ async function uploadLocalFile(bucketId, file, publicKey, prefix, retryCount = 0
 		}, encrypt, (progress) => {
 			g_ProgressDetails.bytesSent += progress.processedBytes - observedProcessedBytes;
 			observedProcessedBytes = progress.processedBytes;
-			if (process.stdout.isTTY) {
-				let pct = Math.floor((progress.processedBytes / file.stat.size) * 100);
-				//process.stdout.clearLine(0);
-				//process.stdout.write(`\rUploading ${why} file ${file.fileName}... ${pct}% (${StdLib.Units.humanReadableBytes(progress.processedBytes, false, true)}) `);
-			}
 		});
 
 		let host = (new URL(uploadDetails.uploadUrl)).host;
@@ -486,7 +588,6 @@ async function uploadLocalFile(bucketId, file, publicKey, prefix, retryCount = 0
 
 		g_ProgressDetails.activeUploads--;
 		g_ProgressDetails.filesSent++;
-		//console.log(`complete`);
 
 		return response;
 	} catch (ex) {
@@ -502,250 +603,8 @@ async function uploadLocalFile(bucketId, file, publicKey, prefix, retryCount = 0
 	}
 }
 
-async function uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries = 0) {
-	let eol = process.stdout.isTTY ? '' : '\n';
-	//process.stdout.write(`Uploading large file ${file.fileName}... preparing ${eol}`);
-
-	let chunkSize = Math.max(50 * 1000 * 1000, Math.ceil(file.stat.size / 10000)); // minimum 50 MB for each chunk
-	let readStream = FS.createReadStream(file.fullPath);
-	let encrypt = Encryption.createEncryptStream(publicKey, {highWaterMark: chunkSize * 2});
-	readStream.pipe(encrypt);
-
-	// TODO handle stream errors
-
-	let response;
-	try {
-		response = await b2.startLargeFile(bucketId, {
-			filename: prefix + file.fileName,
-			b2Info: {
-				[LAST_MODIFIED_KEY]: Math.floor(file.stat.mtimeMs).toString()
-			}
-		});
-	} catch (ex) {
-		if (process.stdout.isTTY) {
-			//process.stdout.clearLine(0);
-			//process.stdout.write('\r');
-		}
-		//process.stdout.write(`Uploading large file ${file.fileName}... ${ex.message} \n`);
-
-		if (retries >= 5) {
-			console.log(`Large file ${file.fileName} failed fatally`);
-			return;
-		}
-
-		await StdLib.Promises.sleepAsync(2000);
-		return await uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries + 1);
-	}
-
-	if (!response.fileId) {
-		console.error(`Did not get a file ID uploading large file ${file.fileName}`);
-		process.exit(5);
-	}
-
-	let fileId = response.fileId;
-
-	let partHashes = [];
-	let processedChunks = 0;
-	let bytesUploaded = 0; // this won't be exact because we're counting encrypted bytes, but it's close enough
-
-	let ended = false;
-	encrypt.on('end', () => ended = true);
-
-	if (process.stdout.isTTY) {
-		//process.stdout.clearLine(0);
-		//process.stdout.write(`\rUploading large file ${file.fileName}... 0% ${eol}`);
-	}
-
-	let printUploadStatus = () => {
-		if (process.stdout.isTTY) {
-			let pct = Math.floor((bytesUploaded / file.stat.size) * 100);
-			//process.stdout.clearLine(0);
-			//process.stdout.write(`\rUploading large file ${file.fileName}... ${pct}% (${StdLib.Units.humanReadableBytes(bytesUploaded)}) `);
-		}
-	};
-
-	// Spin up some "threads" (promises) to handle uploading
-	let uploadThreads = [];
-	let threadStatuses = {};
-	for (let i = 0; i < (syncfile.uploadThreads || MAX_CONCURRENT_UPLOADS); i++) {
-		let threadId = i;
-
-		uploadThreads.push(new Promise(async (resolve) => {
-			let uploadDetails, data;
-
-			while ((data = await getNextChunk()) !== null) {
-				let chunkId = processedChunks++;
-
-				let attempts = 0;
-				let err = null;
-				let dataStream;
-				do {
-					// Reset err or else we will think we had an error even if this succeeds
-					err = null;
-
-					try {
-						threadStatuses[threadId] = {
-							chunkId,
-							startTime: Date.now(),
-							bytes: 0,
-							totalBytes: data.length
-						};
-
-						if (!uploadDetails) {
-							uploadDetails = await b2.getLargeFilePartUploadDetails(fileId);
-							debugLog(`Thread ${threadId} got large file part upload details`);
-						}
-
-						let host = (new URL(uploadDetails.uploadUrl)).host;
-						debugLog(`Thread ${threadId} starting chunk ${chunkId} on attempt ${attempts + 1} (${host})`);
-
-						dataStream = new PassThroughProgressStream(data);
-
-						let hash = Crypto.createHash('sha1');
-						hash.update(data);
-						hash = hash.digest('hex');
-
-						let uploadStartTime = Date.now();
-
-						g_ProgressDetails.activeUploads++;
-
-						let uploadResult = await b2.uploadLargeFilePart(uploadDetails, {
-							partNumber: chunkId + 1,
-							contentLength: data.length,
-							sha1: hash
-						}, dataStream, (progress) => {
-							g_ProgressDetails.bytesSent += progress.processedBytes - threadStatuses[threadId].bytes;
-							bytesUploaded += progress.processedBytes - threadStatuses[threadId].bytes;
-							threadStatuses[threadId].bytes = progress.processedBytes;
-						});
-
-						// part upload succeeded
-						let bytesPerSecond = Math.round(data.length / ((Date.now() - uploadStartTime) / 1000));
-						g_ProgressDetails.activeUploads--;
-						debugLog(`Thread ${threadId} finished uploading chunk ${chunkId} successfully on attempt ${attempts + 1}. Average speed to ${host} is ${StdLib.Units.humanReadableBytes(bytesPerSecond)}/s`);
-
-						bytesUploaded += data.length - threadStatuses[threadId].bytes;
-						threadStatuses[threadId] = null;
-						partHashes[chunkId] = uploadResult.contentSha1;
-						break;
-					} catch (ex) {
-						g_ProgressDetails.activeUploads--;
-
-						dataStream.destroy();
-						let exCode = ex.body && ex.body.code;
-						if (
-							ex.code == 'ECONNRESET' ||
-							(exCode && ['internal_error', 'bad_auth_token', 'expired_auth_token', 'service_unavailable'].includes(exCode))
-						) {
-							// we'll get a new upload url and try again
-							uploadDetails = null;
-						} else {
-							err = ex;
-						}
-
-						// Remove this chunk from bytesUploaded
-						g_ProgressDetails.bytesSent -= threadStatuses[threadId].bytes;
-						bytesUploaded -= threadStatuses[threadId].bytes;
-						threadStatuses[threadId] = null;
-
-						debugLog(`Thread ${threadId} got an error uploading large file chunk ${chunkId}: ${ex.message}`);
-						console.error(`\nError uploading large file: ${ex.message}`);
-						await StdLib.Promises.sleepAsync(5000); // wait 5 seconds
-					}
-				} while (++attempts <= 10);
-
-				if (err) {
-					// Fatal error
-					console.error(`\nFatal error uploading large file ${file.fileName}`);
-					console.error(err);
-					process.exit(5);
-				}
-
-				printUploadStatus();
-			} // get next chunk
-
-			// No more data; we're done
-			resolve();
-		}));
-	}
-
-	let uploadStatusInterval = setInterval(printUploadStatus, 500);
-
-	let threadStatusLoggingInterval = setInterval(() => {
-		let threadStatusFormatted = uploadThreads.map((_, i) => {
-			let threadStatus = `T${i}: `;
-			if (!threadStatuses[i]) {
-				threadStatus += '---';
-			} else {
-				threadStatus += `C${threadStatuses[i].chunkId} ${threadStatuses[i].bytes}/${threadStatuses[i].totalBytes} ` +
-					Math.floor((threadStatuses[i].bytes / threadStatuses[i].totalBytes) * 100) + '% ' +
-					StdLib.Units.humanReadableBytes(Math.round(threadStatuses[i].bytes / ((Date.now() - threadStatuses[i].startTime) / 1000))) + '/s';
-			}
-
-			return threadStatus;
-		}).join(' | ');
-
-		debugLog(threadStatusFormatted);
-	}, 2000);
-
-	debugLog(`Starting ${uploadThreads.length} upload threads for large file ${file.fileName}`);
-
-	await Promise.all(uploadThreads);
-
-	clearInterval(uploadStatusInterval);
-	clearInterval(threadStatusLoggingInterval);
-
-	g_ProgressDetails.filesSent++;
-	debugLog(`Large file ${file.fileName} uploaded all parts successfully`);
-
-	if (process.stdout.isTTY) {
-		//process.stdout.clearLine(0);
-		//process.stdout.write("\r");
-		//process.stdout.write(`Uploading large file ${file.fileName}... finalizing `);
-	}
-
-	try {
-		await b2.finishLargeFile(fileId, partHashes);
-	} catch (ex) {
-		if (process.stdout.isTTY) {
-			//process.stdout.clearLine(0);
-			//process.stdout.write("\r");
-		}
-
-		console.log(`Uploading large file ${file.fileName}... ERROR: ${ex.message}`);
-
-		if (retries >= 5) {
-			console.log(`Large file ${file.fileName} failed fatally`);
-		} else {
-			await StdLib.Promises.sleepAsync(2000);
-			return await uploadLargeLocalFile(bucketId, file, publicKey, prefix, retries + 1);
-		}
-	}
-
-	if (process.stdout.isTTY) {
-		//process.stdout.clearLine(0);
-		//process.stdout.write("\r");
-	}
-
-	console.log(`Uploading large file ${file.fileName}... complete`);
-
-	async function getNextChunk() {
-		if (ended) {
-			return null;
-		}
-
-		let chunk = encrypt.read(chunkSize);
-		if (chunk !== null) {
-			return chunk;
-		} else {
-			await new Promise(resolve => setTimeout(resolve, 500));
-			return await getNextChunk();
-		}
-	}
-}
-
 async function hideRemoteFile(file, prefix) {
-	console.log(`Hiding missing remote file ${file.fileName}`);
+	log(`Hide ${file.fileName}`);
 	await b2.hideFile(file.bucketId, prefix + file.fileName);
 }
 
@@ -758,18 +617,12 @@ async function getUploadDetails(bucketId) {
 	return g_UploadDetails;
 }
 
-function sha1(data) {
-	let hash = Crypto.createHash('sha1');
-	hash.update(data);
-	return hash.digest('hex');
-}
-
 async function cancelUnfinishedLargeFiles(bucketId, namePrefix) {
 	let {files} = await b2.listAllUnfinishedLargeFiles(bucketId, {namePrefix});
 
-	console.log(`Found ${files.length} unfinished large files to cancel`);
+	log(`Found ${files.length} unfinished large files to cancel`);
 	for (let i = 0; i < files.length; i++) {
 		await b2.cancelUnfinishedLargeFile(files[i].fileId);
-		console.log(`Canceled large file ${files[i].fileId}`);
+		log(`Canceled large file ${files[i].fileId}`);
 	}
 }
