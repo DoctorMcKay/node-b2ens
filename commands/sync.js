@@ -289,16 +289,18 @@ async function main() {
 
 			await new Promise((resolve) => g_UploadQueue.drain = resolve);
 
-			clearInterval(progressOutputInterval);
-			g_ConsoleInDynamicMode = false;
-			process.stdout.removeListener('resize', flushLogLines);
+			if (process.stdout.isTTY) {
+				clearInterval(progressOutputInterval);
+				g_ConsoleInDynamicMode = false;
+				process.stdout.removeListener('resize', flushLogLines);
 
-			// Clear the progress line
-			process.stdout.cursorTo(0, process.stdout.rows - 1);
-			process.stdout.clearLine(0);
+				// Clear the progress line
+				process.stdout.cursorTo(0, process.stdout.rows - 1);
+				process.stdout.clearLine(0);
 
-			// Figure out where we need to move the cursor to
-			process.stdout.cursorTo(0, getLogLinesForFlush().length);
+				// Figure out where we need to move the cursor to
+				process.stdout.cursorTo(0, getLogLinesForFlush().length);
+			}
 		}
 
 		let hideQueue = new StdLib.DataStructures.AsyncQueue(({file, prefix}, callback) => {
