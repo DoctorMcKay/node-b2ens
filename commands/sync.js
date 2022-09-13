@@ -252,8 +252,11 @@ async function main() {
 		bucketFiles[file.fileName] = file;
 	});
 
+	log(`Found ${Object.keys(bucketFiles).length} remote files`);
+
 	log('Examining local directory...');
 	let localFiles = listLocalFiles(syncfile.local.directory, syncfile.local.exclude || []);
+	log(`Found ${Object.keys(localFiles).length} local files`);
 
 	try {
 		for (let i in localFiles) {
@@ -276,7 +279,7 @@ async function main() {
 		if (g_UploadQueue.length == 0) {
 			log('Nothing to upload');
 		} else {
-			log('Starting uploads');
+			log(`Starting uploads - ${g_UploadQueue.length} files to upload`);
 
 			// Start up our progress display interval
 			let progressOutputInterval = null;
