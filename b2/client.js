@@ -472,8 +472,10 @@ class B2 {
 				}
 			});
 
+			let aborted = false;
+
 			req.on('error', (err) => {
-				if (err.message != 'Timeout, retrying') {
+				if (!aborted && err.message != 'Timeout, retrying') {
 					reject(err);
 				}
 			});
@@ -485,7 +487,7 @@ class B2 {
 					uploadStream,
 					req,
 					(err) => {
-						if (err) {
+						if (err && err.message != 'Timeout, retrying' && !aborted) {
 							reject(err);
 						}
 					}
@@ -503,6 +505,8 @@ class B2 {
 						debugLog(`Socket connect timed out for ${params.url}`);
 
 						req.destroy(new Error('Timeout, retrying'));
+						sock.destroy(new Error('Timeout, retrying'));
+						aborted = true;
 
 						let retryCount = params.retryCount || 0;
 						if (retryCount >= 5) {
