@@ -472,7 +472,11 @@ class B2 {
 				}
 			});
 
-			req.on('error', reject);
+			req.on('error', (err) => {
+				if (err.message != 'Timeout, retrying') {
+					reject(err);
+				}
+			});
 
 			if (params.body && typeof params.body == 'object' && typeof params.body.pipe == 'function') {
 				let uploadStream = new B2UploadStream(params.onUploadProgress);
@@ -489,6 +493,37 @@ class B2 {
 			} else {
 				req.end(params.body);
 			}
+
+			req.on('socket', (sock) => {
+				// If this socket isn't already connected, then we want to set a timeout
+				if (sock.connecting) {
+					sock.setTimeout(2500);
+
+					sock.on('timeout', () => {
+						debugLog(`Socket connect timed out for ${params.url}`);
+
+						req.destroy(new Error('Timeout, retrying'));
+
+						let retryCount = params.retryCount || 0;
+						if (retryCount >= 5) {
+							// If we've retried 5 or more times, go ahead and fail permanently
+							let err = new Error(`connect ETIMEDOUT ${params.url}`);
+							err.code = 'ETIMEDOUT';
+							err.syscall = 'connect';
+							err.url = params.url;
+							reject(err);
+						} else {
+							this._req({...params, retryCount: retryCount + 1})
+								.then(resolve)
+								.catch(reject);
+						}
+					});
+
+					sock.on('connect', () => {
+						sock.setTimeout(0);
+					});
+				}
+			});
 		});
 	}
 }
