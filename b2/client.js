@@ -308,9 +308,9 @@ class B2 {
 	 */
 	async listFileNames(bucketId, options) {
 		let res = await this._req({
-			method: 'POST',
+			method: 'GET',
 			url: this.authorization.apiUrl + B2_API_PATH + '/b2_list_file_names',
-			body: {
+			qs: {
 				bucketId,
 				...(options || {})
 			}
@@ -367,6 +367,23 @@ class B2 {
 	}
 
 	/**
+	 * @param {string} fileId
+	 * @returns {Promise<Readable>}
+	 */
+	async downloadFileById(fileId) {
+		let res = await this._req({
+			returnStream: true,
+			method: 'GET',
+			url: this.authorization.downloadUrl + B2_API_PATH + '/b2_download_file_by_id',
+			qs: {
+				fileId
+			}
+		});
+
+		return res;
+	}
+
+	/**
 	 * Returns the response as a stream, or parsed JSON.
 	 * @param {{method?: string, url: string, headers?: object, qs?: object, onUploadProgress?: function, body?: string|object|Stream.Readable}} params
 	 * @returns {Promise<Stream.Readable>}
@@ -418,7 +435,7 @@ class B2 {
 				path: url.path,
 				headers,
 			}, (res) => {
-				if (res.headers['content-type'] && res.headers['content-type'].match(/^application\/json/i)) {
+				if (!params.returnStream && res.headers['content-type'] && res.headers['content-type'].match(/^application\/json/i)) {
 					let data = '';
 					res.on('error', reject);
 					res.on('data', chunk => data += chunk.toString('utf8'));

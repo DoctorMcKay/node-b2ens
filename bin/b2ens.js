@@ -4,6 +4,7 @@ const AVAILABLE_COMMANDS = [
 	'sync',
 	'decrypt-file',
 	'decrypt-folder',
+	'download',
 	'encrypt-file',
 	'generate-keypair',
 	'generate-syncfile'
