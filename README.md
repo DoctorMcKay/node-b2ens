@@ -35,6 +35,20 @@ $ b2ens generate-keypair <public key output file path> <private key output file 
 $ b2ens generate-syncfile
     Interactively guides you through creating a syncfile
 
+$ b2ens download
+	Download and decrypt files from the B2 bucket
+	
+	Options:
+	      --help         Show help
+	      --dir          Remote directory to download. Omit to download everything
+	  -o, --output       Path to output directory on local disk (files will be overwritten)    [required]
+	  -s, --syncfile     Optional path to syncfile. If provided, you don't need to
+	                     separately pass --bucket, --key-id, or --app-key
+	  -b, --bucket       name of bucket to download files from
+	      --key-id       B2 key ID to use to access your bucket
+	      --app-key      B2 application key to use to access your bucket
+	      --private-key  Path to PEM-encoded private key used to decrypt files                 [required]
+
 $ b2ens encrypt-file <path to public or private key> <input file path> [output file path]
 
 $ b2ens decrypt-file <path to private key> <input file path> [output file path] 
