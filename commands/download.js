@@ -154,12 +154,23 @@ function printProgressLine() {
 	let etaMinutes = Math.floor(etaSeconds / 60);
 	etaSeconds -= etaMinutes * 60;
 
+	let etaParts = [etaHours, etaMinutes, etaSeconds];
+	if (etaParts[0] == 0) {
+		// remove hours if it's 0
+		etaParts.splice(0, 1);
+	}
+
+	// every component of the ETA except the first one needs to get leading zeroes
+	for (let i = 1; i < etaParts.length; i++) {
+		etaParts[i] = etaParts[i].toString().padStart(2, '0');
+	}
+
 	let infoTags = [
 		`${g_ProgressDetails.activeDownloads.toString().padStart(2, ' ')} cxns`,
 		`${g_ProgressDetails.filesReceived}/${g_ProgressDetails.totalFiles} files`,
 		`${StdLib.Units.humanReadableBytes(g_ProgressDetails.bytesReceived, false, true)}/${StdLib.Units.humanReadableBytes(g_ProgressDetails.totalBytes)}`,
 		`${StdLib.Units.humanReadableBytes(averageSpeed, false, true)}/s`,
-		isNaN(etaSeconds) ? 'ETA -:--' : `ETA ${etaHours > 0 ? `${etaHours}:` : ''}${etaMinutes}:${etaSeconds.toString().padStart(2, '0')}`
+		isNaN(etaSeconds) ? 'ETA -:--' : `ETA ${etaParts.join(':')}`
 	];
 
 	let infoTagPriority = [
