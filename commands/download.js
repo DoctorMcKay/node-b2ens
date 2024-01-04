@@ -75,7 +75,7 @@ let g_BucketName = argv.bucket;
 let g_Bucket = null;
 let g_KeyId = argv.keyId;
 let g_AppKey = argv.appKey;
-let g_DownloadPrefix = argv.dir;
+let g_DownloadPrefix = argv.dir || '';
 
 let g_BucketFiles = {};
 let g_DirModTimes = {};
