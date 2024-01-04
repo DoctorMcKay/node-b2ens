@@ -155,7 +155,7 @@ function printProgressLine() {
 	etaSeconds -= etaMinutes * 60;
 
 	let infoTags = [
-		`${g_ProgressDetails.activeDownloads} cxns`,
+		`${g_ProgressDetails.activeDownloads.toString().padStart(2, ' ')} cxns`,
 		`${g_ProgressDetails.filesReceived}/${g_ProgressDetails.totalFiles} files`,
 		`${StdLib.Units.humanReadableBytes(g_ProgressDetails.bytesReceived, false, true)}/${StdLib.Units.humanReadableBytes(g_ProgressDetails.totalBytes)}`,
 		`${StdLib.Units.humanReadableBytes(averageSpeed, false, true)}/s`,
