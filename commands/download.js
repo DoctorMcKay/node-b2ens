@@ -253,7 +253,13 @@ async function main() {
 	log(`Downloading remote ${prefixMsg} from bucket with remote bucket ${g_Bucket.bucketName} (${g_Bucket.bucketId})`);
 
 	log('Listing files in bucket...');
-	let {files} = await b2.listAllFileNames(g_Bucket.bucketId, {prefix: g_DownloadPrefix});
+
+	let options = {};
+	if (g_DownloadPrefix && g_DownloadPrefix.length > 0) {
+		options.prefix = g_DownloadPrefix;
+	}
+
+	let {files} = await b2.listAllFileNames(g_Bucket.bucketId, options);
 	g_BucketFiles = {};
 	files.forEach((file) => {
 		if (file.action != 'upload') {
