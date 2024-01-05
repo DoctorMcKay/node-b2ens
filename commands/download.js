@@ -358,6 +358,19 @@ async function main() {
 		await new Promise((resolve) => g_DownloadQueue.drain = resolve);
 	}
 
+	if (process.stdout.isTTY) {
+		clearInterval(progressOutputInterval);
+		g_ConsoleInDynamicMode = false;
+		process.stdout.removeListener('resize', flushLogLines);
+
+		// Clear the progress line
+		process.stdout.cursorTo(0, process.stdout.rows - 1);
+		process.stdout.clearLine(0);
+
+		// Figure out where we need to move the cursor to
+		process.stdout.cursorTo(0, getLogLinesForFlush().length);
+	}
+
 	log('Downloads complete. Verifying downloads...');
 
 	// We need to update directory mtimes now. We can't do it before since some directories might already exist
@@ -387,19 +400,6 @@ async function main() {
 	let now = new Date();
 	for (let i in directoryModTimes) {
 		await FS.utimes(Path.join(localPath, i), now, new Date(directoryModTimes[i]));
-	}
-
-	if (process.stdout.isTTY) {
-		clearInterval(progressOutputInterval);
-		g_ConsoleInDynamicMode = false;
-		process.stdout.removeListener('resize', flushLogLines);
-
-		// Clear the progress line
-		process.stdout.cursorTo(0, process.stdout.rows - 1);
-		process.stdout.clearLine(0);
-
-		// Figure out where we need to move the cursor to
-		process.stdout.cursorTo(0, getLogLinesForFlush().length);
 	}
 }
 
