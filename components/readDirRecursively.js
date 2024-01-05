@@ -1,22 +1,25 @@
-const FS = require('fs');
+const FS = require('fs').promises;
 const Path = require('path');
 
-function readDirRecursively(dir) {
+async function readDirRecursively(dir) {
 	let files = [];
-	
-	FS.readdirSync(dir).forEach((filename) => {
+
+	let dirListing = await FS.readdir(dir);
+	for (let i = 0; i < dirListing.length; i++) {
+		let filename = dirListing[i];
+
 		let fullFilePath = Path.join(dir, filename);
-		let stat = FS.statSync(fullFilePath);
+		let stat = await FS.stat(fullFilePath);
 		if (stat.isDirectory()) {
-			files = files.concat(readDirRecursively(fullFilePath));
+			files = files.concat(await readDirRecursively(fullFilePath));
 		} else {
 			files.push({
 				path: fullFilePath,
 				stat
 			});
 		}
-	});
-	
+	}
+
 	return files;
 }
 

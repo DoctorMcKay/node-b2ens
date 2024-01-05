@@ -11,7 +11,9 @@ const B2DownloadStream = require('../b2/downloadstream');
 const Encryption = require('../components/encryption');
 
 const debugLog = require('../components/logging');
+const readDirRecursively = require('../components/readDirRecursively');
 
+const LAST_MODIFIED_KEY = 'src_last_modified_millis';
 const MAX_CONCURRENT_DOWNLOADS = 10;
 
 const {argv} = yargs(hideBin(process.argv))
@@ -42,6 +44,10 @@ const {argv} = yargs(hideBin(process.argv))
 			.option('private-key', {
 				describe: 'Path to PEM-encoded private key used to decrypt files',
 				demandOption: true
+			})
+			.option('threads', {
+				describe: 'Number of concurrent downloads',
+				default: 10
 			});
 	})
 	.help();
@@ -79,7 +85,7 @@ let g_DownloadPrefix = argv.dir || '';
 
 let g_BucketFiles = {};
 let g_DirModTimes = {};
-let g_DownloadQueue = new StdLib.DataStructures.AsyncQueue(processDownload, MAX_CONCURRENT_DOWNLOADS);
+let g_DownloadQueue = new StdLib.DataStructures.AsyncQueue(processDownload, argv.threads || MAX_CONCURRENT_DOWNLOADS);
 
 function log(msg) {
 	let output = StdLib.Time.timestampString() + ' - ' + msg;
@@ -261,7 +267,7 @@ async function main() {
 
 	g_Bucket = g_Bucket.buckets[0];
 	let prefixMsg = g_DownloadPrefix.length == 0 ? 'all files' : `files starting with "${g_DownloadPrefix}"`;
-	log(`Downloading remote ${prefixMsg} from bucket with remote bucket ${g_Bucket.bucketName} (${g_Bucket.bucketId})`);
+	log(`Downloading remote ${prefixMsg} from bucket ${g_Bucket.bucketName} (${g_Bucket.bucketId})`);
 
 	log('Listing files in bucket...');
 
@@ -295,27 +301,92 @@ async function main() {
 	}
 
 	log(`Found ${Object.keys(g_BucketFiles).length} remote files`);
+	log('Inspecting local folder...');
+
+	let localPath = Path.normalize(argv.output);
+	let localFiles = [];
+	try {
+		localFiles = await readDirRecursively(localPath);
+	} catch (ex) {
+		if (ex.code == 'ENOENT') {
+			// local folder doesn't exist yet, this is fine
+		} else {
+			throw ex;
+		}
+	}
+
+	let localFilesMap = {};
+	localFiles.forEach(({path, stat}) => {
+		let relativePath = unNormalizePath(trimLeadingDirSep(path.replace(localPath, '')));
+		localFilesMap[relativePath] = stat;
+	});
+
+	let alreadyExistingFiles = 0;
 
 	for (let i in g_BucketFiles) {
+		let file = g_BucketFiles[i];
+
+		let relativeRemotePath = file.fileName.replace(g_DownloadPrefix, '');
+		let localFileStat = localFilesMap[relativeRemotePath];
+		if (localFileStat && file.fileInfo[LAST_MODIFIED_KEY] && Math.floor(localFileStat.mtimeMs) == file.fileInfo[LAST_MODIFIED_KEY]) {
+			// This is the best we can do to determine if the file exists locally. We can't compare file sizes since the
+			// size after encryption may be different, and we can't compare hashes since the remote hash is after encryption.
+			alreadyExistingFiles++;
+			continue;
+		}
+
 		g_ProgressDetails.totalFiles++;
 		g_ProgressDetails.totalBytes += g_BucketFiles[i].contentLength;
 		g_DownloadQueue.push(g_BucketFiles[i]);
 	}
 
-	// Start up our progress display interval
-	let progressOutputInterval = null;
-	if (process.stdout.isTTY) {
-		flushLogLines();
-		process.stdout.on('resize', flushLogLines);
-		progressOutputInterval = setInterval(printProgressLine, 500);
-		g_ConsoleInDynamicMode = true;
+	if (alreadyExistingFiles > 0) {
+		log(`${alreadyExistingFiles} file(s) already exist locally and appear to be up-to-date. Skipping download for those files.`);
 	}
 
-	await new Promise((resolve) => g_DownloadQueue.drain = resolve);
+	let progressOutputInterval = null;
 
-	log(`Updating ${Object.keys(g_DirModTimes).length} directory modification times`);
-	for (let i in g_DirModTimes) {
-		await FS.utimes(i, ...g_DirModTimes[i]);
+	if (g_ProgressDetails.totalFiles > 0) {
+		// Start up our progress display interval
+		if (process.stdout.isTTY) {
+			flushLogLines();
+			process.stdout.on('resize', flushLogLines);
+			progressOutputInterval = setInterval(printProgressLine, 500);
+			g_ConsoleInDynamicMode = true;
+		}
+
+		await new Promise((resolve) => g_DownloadQueue.drain = resolve);
+	}
+
+	log('Downloads complete. Verifying downloads...');
+
+	// We need to update directory mtimes now. We can't do it before since some directories might already exist
+	// from a partial download.
+	localFiles = await readDirRecursively(localPath);
+	let directoryModTimes = {};
+
+	for (let i = 0; i < localFiles.length; i++) {
+		let {path, stat} = localFiles[i];
+		let relativePath = trimLeadingDirSep(path.replace(localPath, ''));
+		let dir = Path.dirname(relativePath);
+
+		if (dir == '.') {
+			// Don't try to update mtime for the root dl folder
+			continue;
+		}
+
+		// Update all mtimes up the path
+		let paths = dir.split(Path.sep);
+		for (let j = 0; j < paths.length; j++) {
+			let dirPath = paths.slice(0, j + 1).join(Path.sep);
+			directoryModTimes[dirPath] = Math.max(directoryModTimes[dirPath] || 0, stat.mtimeMs);
+		}
+	}
+
+	log(`Updating ${Object.keys(directoryModTimes).length} directory modification times`);
+	let now = new Date();
+	for (let i in directoryModTimes) {
+		await FS.utimes(Path.join(localPath, i), now, new Date(directoryModTimes[i]));
 	}
 
 	if (process.stdout.isTTY) {
@@ -350,7 +421,7 @@ async function processDownload(file, callback, retryCount = 0) {
 
 		// Make sure the parent directory exists
 		let diskFilePath = Path.join(argv.output, file.fileName);
-		await fixDirMtime(await FS.mkdir(Path.resolve(diskFilePath, '..'), {recursive: true}), diskFilePath);
+		await FS.mkdir(Path.resolve(diskFilePath, '..'), {recursive: true});
 		let outputFile = createWriteStream(diskFilePath);
 
 		await new Promise((resolve, reject) => {
@@ -374,8 +445,8 @@ async function processDownload(file, callback, retryCount = 0) {
 
 		// we're finished successfully
 		// update the file's mtime if we have it from b2
-		if (file.fileInfo && file.fileInfo.src_last_modified_millis) {
-			await FS.utimes(diskFilePath, new Date(), new Date(parseInt(file.fileInfo.src_last_modified_millis)));
+		if (file.fileInfo && file.fileInfo[LAST_MODIFIED_KEY]) {
+			await FS.utimes(diskFilePath, new Date(), new Date(parseInt(file.fileInfo[LAST_MODIFIED_KEY])));
 		}
 
 		g_ProgressDetails.activeDownloads--;
@@ -428,7 +499,7 @@ async function fixDirMtime(dir, file) {
 
 		// figure out which files belong to this directory
 		let filesInPath = Object.values(g_BucketFiles)
-			.filter(f => f.action == 'upload' && Path.normalize(f.fileName).startsWith(cumulativePath) && f.fileInfo && f.fileInfo.src_last_modified_millis);
+			.filter(f => f.action == 'upload' && Path.normalize(f.fileName).startsWith(cumulativePath) && f.fileInfo && f.fileInfo[LAST_MODIFIED_KEY]);
 
 		if (filesInPath.length == 0) {
 			// no files matched that have modification timestamps
@@ -436,7 +507,7 @@ async function fixDirMtime(dir, file) {
 		}
 
 		// get the latest modification time of any of those files
-		let maxModTime = Math.max(...filesInPath.map(f => parseInt(f.fileInfo.src_last_modified_millis)));
+		let maxModTime = Math.max(...filesInPath.map(f => parseInt(f.fileInfo[LAST_MODIFIED_KEY])));
 
 		// now save it to set later. if we set it now, it'll be overwritten when we write files inside.
 		g_DirModTimes[Path.resolve(argv.output, cumulativePath)] = [new Date(), new Date(maxModTime)];
